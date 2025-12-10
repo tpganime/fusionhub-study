@@ -18,6 +18,7 @@ export const Subject: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { materials } = useApp();
   const [activeTab, setActiveTab] = useState<'content' | 'ai'>('content');
+  const [searchQuery, setSearchQuery] = useState('');
   
   // AI Chat State
   const [chatSession, setChatSession] = useState<Chat | null>(null);
@@ -27,7 +28,13 @@ export const Subject: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const subjectName = id as SubjectType;
-  const filteredMaterials = materials.filter(m => m.subject === subjectName);
+  
+  // Filter materials by Subject AND Search Query
+  const filteredMaterials = materials.filter(m => {
+    const matchesSubject = m.subject === subjectName;
+    const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSubject && matchesSearch;
+  });
 
   // Initialize Chat Session when subject changes
   useEffect(() => {
@@ -213,42 +220,59 @@ export const Subject: React.FC = () => {
       </div>
 
       {activeTab === 'content' ? (
-        <div className="grid gap-4 overflow-y-auto pb-4 custom-scrollbar">
-          {filteredMaterials.length === 0 ? (
-             <div className="text-center py-20 bg-white dark:bg-dark-card rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-700 animate-pulse">
-                <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500 font-medium">No materials uploaded for this subject yet.</p>
-             </div>
-          ) : (
-            filteredMaterials.map((item, idx) => (
-                <div 
-                    key={item.id} 
-                    className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1"
-                    style={{ animationDelay: `${idx * 100}ms` }}
-                >
-                    <div className="flex items-center space-x-4 w-full sm:w-auto">
-                        <div className={`p-4 rounded-xl flex-shrink-0 ${getMaterialColor(item.type)}`}>
-                            {getMaterialIcon(item.type)}
-                        </div>
-                        <div className="overflow-hidden">
-                            <h3 className="font-bold text-lg dark:text-gray-200 truncate pr-2">{item.title}</h3>
-                            <p className="text-xs text-gray-500 font-medium mt-1 flex items-center">
-                                <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded mr-2 uppercase">{item.type}</span>
-                                <span>{item.size}</span>
-                                <span className="mx-2">•</span>
-                                {new Date(item.uploadDate).toLocaleDateString()}
-                            </p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => handleDownload(item.url, item.title)}
-                        className="mt-4 sm:mt-0 w-full sm:w-auto flex items-center justify-center px-4 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm font-bold transition dark:text-gray-300"
-                    >
-                        <Download className="w-4 h-4 mr-2" /> Download
-                    </button>
-                </div>
-            ))
-          )}
+        <div className="flex flex-col h-full">
+          {/* Search Bar */}
+          <div className="flex-none relative mb-4">
+             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+             <input
+               type="text"
+               placeholder="Search notes and videos..."
+               value={searchQuery}
+               onChange={(e) => setSearchQuery(e.target.value)}
+               className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white placeholder-gray-500"
+             />
+          </div>
+
+          {/* Materials List */}
+          <div className="grid gap-4 overflow-y-auto pb-4 custom-scrollbar flex-grow">
+            {filteredMaterials.length === 0 ? (
+               <div className="text-center py-20 bg-white dark:bg-dark-card rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-700">
+                  <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 font-medium">
+                    {searchQuery ? `No matches found for "${searchQuery}"` : "No materials uploaded for this subject yet."}
+                  </p>
+               </div>
+            ) : (
+              filteredMaterials.map((item, idx) => (
+                  <div 
+                      key={item.id} 
+                      className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1"
+                      style={{ animationDelay: `${idx * 100}ms` }}
+                  >
+                      <div className="flex items-center space-x-4 w-full sm:w-auto">
+                          <div className={`p-4 rounded-xl flex-shrink-0 ${getMaterialColor(item.type)}`}>
+                              {getMaterialIcon(item.type)}
+                          </div>
+                          <div className="overflow-hidden">
+                              <h3 className="font-bold text-lg dark:text-gray-200 truncate pr-2">{item.title}</h3>
+                              <p className="text-xs text-gray-500 font-medium mt-1 flex items-center">
+                                  <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded mr-2 uppercase">{item.type}</span>
+                                  <span>{item.size}</span>
+                                  <span className="mx-2">•</span>
+                                  {new Date(item.uploadDate).toLocaleDateString()}
+                              </p>
+                          </div>
+                      </div>
+                      <button 
+                          onClick={() => handleDownload(item.url, item.title)}
+                          className="mt-4 sm:mt-0 w-full sm:w-auto flex items-center justify-center px-4 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm font-bold transition dark:text-gray-300"
+                      >
+                          <Download className="w-4 h-4 mr-2" /> Download
+                      </button>
+                  </div>
+              ))
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex-grow flex flex-col bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm overflow-hidden">
