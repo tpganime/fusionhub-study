@@ -166,8 +166,7 @@ export const Admin: React.FC = () => {
             await updateTimetable(otherBatch, dayIndex, formPeriodIndex, formSubject, formStartTime, formEndTime);
         }
         
-        // Short delay to allow visual feedback
-        setTimeout(() => alert('Period updated successfully!'), 100);
+        alert('Period updated successfully!');
     } catch (e) {
         console.error(e);
         alert('Failed to update period');

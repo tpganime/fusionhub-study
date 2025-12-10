@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { UserSettings, Batch, Timetable, StudyMaterial, SubjectType } from '../types';
 import { DEFAULT_TIMETABLE } from '../constants';
 import { supabase } from '../services/supabaseClient';
@@ -31,6 +31,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   // Data from Supabase
   const [timetable, setTimetable] = useState<Timetable>(DEFAULT_TIMETABLE);
+  // Use a Ref to hold the latest timetable state. This prevents stale closure issues
+  // when updateTimetable is called multiple times rapidly (e.g., for "Both Batches").
+  const timetableRef = useRef<Timetable>(DEFAULT_TIMETABLE);
+
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -82,6 +86,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              }
           });
           setTimetable(newTimetable);
+          timetableRef.current = newTimetable; // Sync Ref
         } else {
           // If no timetable exists in DB, insert default one
           await supabase.from('timetables').upsert([
@@ -109,10 +114,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const logoutAdmin = () => setIsAdmin(false);
 
   const updateTimetable = async (batch: Batch, dayIndex: number, periodIndex: number, subject: string, startTime: string, endTime: string) => {
-    // 1. Construct the new schedule based on the current state available in closure.
-    // Note: We access timetable[batch] directly. Even if 'timetable' is slightly stale regarding *other* batches,
-    // it usually holds the correct current state for *this* batch (unless edited concurrently).
-    const currentBatchSchedule = timetable[batch];
+    // 1. Use Ref to get absolute latest state (bypassing closure staleness)
+    const currentTimetable = timetableRef.current;
+    const currentBatchSchedule = currentTimetable[batch];
+    
     if (!currentBatchSchedule) return;
 
     const newSchedule = currentBatchSchedule.map((day, dIdx) => {
@@ -126,22 +131,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     });
     
-    // 2. Optimistic UI update using Functional State Update
-    // CRITICAL FIX: We use 'prev' to ensure we are merging into the absolute latest state.
-    // This allows consecutive calls (e.g., for Batch 1 then Batch 2) to work without overwriting each other.
-    setTimetable(prev => ({
-      ...prev,
+    // 2. Update Ref immediately so subsequent calls see this change
+    const updatedTimetable = {
+      ...currentTimetable,
       [batch]: newSchedule
-    }));
+    };
+    timetableRef.current = updatedTimetable;
 
-    // 3. Sync with Supabase
+    // 3. Update React State to trigger re-render
+    setTimetable(updatedTimetable);
+
+    // 4. Sync with Supabase (using the clean newSchedule for this specific batch)
     try {
       await supabase
         .from('timetables')
         .upsert({ batch: batch, schedule: newSchedule });
     } catch (error) {
       console.error("Failed to update timetable in DB", error);
-      // Optionally revert state here on error, but complex to implement cleanly
     }
   };
 
