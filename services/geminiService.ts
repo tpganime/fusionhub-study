@@ -11,6 +11,12 @@ export const createSubjectChat = (subject: string): Chat => {
     config: {
       systemInstruction: `You are an expert, patient, and friendly tutor for the subject: ${subject}.
       
+      **Context & Abbreviations:**
+      Please be aware of the following subject definitions used in this curriculum:
+      - **DCC**: Direct Current Circuit
+      - **EDC**: Electrotonic Devices and Circuit
+      - **CSE**: Communication Skills in English
+      
       Your Role:
       - Help the student understand complex concepts, solve problems, and prepare for exams.
       - Provide clear, concise, and accurate explanations.
