@@ -1,0 +1,276 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { useApp } from '../context/AppContext';
+import { SUBJECTS } from '../constants';
+import { Period, SubjectType } from '../types';
+import { Clock, Calendar, Cpu, Zap, FlaskConical, Code, Calculator, BookOpen, FileText } from 'lucide-react';
+import { formatTo12Hour } from '../utils/helpers';
+
+export const Home: React.FC = () => {
+  const { settings, timetable } = useApp();
+  const [currentPeriod, setCurrentPeriod] = useState<Period | null>(null);
+  const [nextPeriod, setNextPeriod] = useState<Period | null>(null);
+  const [isHoliday, setIsHoliday] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Ref to track the last notified period ID to prevent repeated notifications
+  const lastNotifiedPeriodRef = useRef<string | null>(null);
+
+  // --- Logic for 2nd and 3rd Saturday ---
+  const checkIsOffDay = (date: Date) => {
+    const day = date.getDay();
+    const dateNum = date.getDate();
+    
+    // 0 is Sunday
+    if (day === 0) return true;
+
+    if (day === 6) { // Saturday
+      // Calculate which Saturday it is (1st, 2nd, 3rd, 4th, 5th)
+      const weekNum = Math.ceil(dateNum / 7);
+      // User requested off on 2nd and 3rd Saturday
+      if (weekNum === 2 || weekNum === 3) return true;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+
+      if (checkIsOffDay(now)) {
+        setIsHoliday(true);
+        setCurrentPeriod(null);
+        setNextPeriod(null);
+        lastNotifiedPeriodRef.current = null;
+        return;
+      } else {
+        setIsHoliday(false);
+      }
+
+      // Logic to find current period
+      // Need to map Day index (0-6) to Array index (0-5, Mon-Sat)
+      let dayIndex = now.getDay() - 1; 
+      if (dayIndex < 0 || dayIndex > 5) {
+        // Sunday
+        setCurrentPeriod(null);
+        lastNotifiedPeriodRef.current = null;
+        return;
+      }
+
+      const todaySchedule = timetable[settings.batch][dayIndex];
+      // Keep internal comparison in 24h format for accuracy
+      const timeString = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+      const current = todaySchedule.periods.find(p => timeString >= p.startTime && timeString < p.endTime);
+      setCurrentPeriod(current || null);
+
+      if (current) {
+        const currentIndex = todaySchedule.periods.indexOf(current);
+        if (currentIndex < todaySchedule.periods.length - 1) {
+          setNextPeriod(todaySchedule.periods[currentIndex + 1]);
+        } else {
+          setNextPeriod(null);
+        }
+
+        // --- Notification Logic ---
+        if (settings.notificationsEnabled) {
+          // If we haven't notified for this specific period ID yet
+          if (lastNotifiedPeriodRef.current !== current.id) {
+             if (Notification.permission === 'granted') {
+                new Notification(`Class Started: ${current.subject}`, {
+                   body: `${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
+                   icon: '/favicon.ico' // Falls back to browser default if missing
+                });
+             }
+             lastNotifiedPeriodRef.current = current.id;
+          }
+        }
+
+      } else {
+        // Check if before first period
+        const first = todaySchedule.periods[0];
+        if (timeString < first.startTime) {
+           setNextPeriod(first);
+        } else {
+           setNextPeriod(null);
+        }
+        // Reset notification ref if no period is active (e.g. lunch break)
+        // This ensures if a period happens again (unlikely in linear time) or after break, we track correctly.
+        // However, standard timetable usually doesn't repeat IDs. 
+        // We keep track of IDs.
+        
+        // Actually, if we are in a break, we should allow the next period to trigger.
+        // The ID check handles this.
+      }
+
+    }, 1000); // Update every second for smooth clock
+
+    // Initial run
+    const now = new Date();
+    if(checkIsOffDay(now)) setIsHoliday(true);
+    
+    return () => clearInterval(timer);
+  }, [timetable, settings.batch, settings.notificationsEnabled]);
+
+  const getSubjectIcon = (id: string) => {
+    switch (id) {
+      case SubjectType.DCC: return <Cpu className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.EDC: return <Zap className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.CHEMISTRY: return <FlaskConical className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.CSE: return <Code className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.MATHS: return <Calculator className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.LIBRARY: return <BookOpen className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.FICT: return <FileText className="w-10 h-10 text-white stroke-[1.5]" />;
+      default: return <Cpu className="w-10 h-10 text-white stroke-[1.5]" />;
+    }
+  };
+
+  return (
+    <div className="space-y-6 sm:space-y-8 animate-fade-in-up pb-10">
+      {/* Header Greeting */}
+      <div className="flex flex-col md:flex-row justify-between items-center bg-white dark:bg-dark-card rounded-2xl p-6 border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="text-center md:text-left">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-1 text-gray-900 dark:text-white">Welcome Back</h1>
+          <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
+            Batch: <span className="font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded ml-1">{settings.batch}</span>
+          </p>
+        </div>
+        <div className="mt-4 md:mt-0 text-center md:text-right">
+          <p className="text-3xl sm:text-4xl font-mono font-bold tracking-tight text-gray-800 dark:text-gray-100">
+            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+          </p>
+          <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm uppercase tracking-wide font-medium mt-1">
+            {currentTime.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          </p>
+        </div>
+      </div>
+
+      {/* Subject Grid - Updated to match Screenshot */}
+      <div>
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 px-1">Study Subjects</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {SUBJECTS.map((sub, index) => (
+            <Link 
+              key={sub.id} 
+              to={`/subject/${sub.id}`}
+              className={`group relative overflow-hidden rounded-2xl p-6 h-48 shadow-lg transition-transform hover:scale-[1.02] duration-300 flex flex-col justify-between ${sub.color}`}
+              style={{ animationDelay: `${index * 50}ms` }}
+            >
+              {/* Decorative Circles Overlay */}
+              <div className="absolute -bottom-8 -right-8 w-32 h-32 bg-white opacity-10 rounded-full blur-none group-hover:scale-110 transition-transform duration-500"></div>
+              <div className="absolute bottom-8 -right-12 w-32 h-32 bg-white opacity-5 rounded-full blur-xl group-hover:scale-110 transition-transform duration-500"></div>
+
+              {/* Icon */}
+              <div className="relative z-10">
+                {getSubjectIcon(sub.id)}
+              </div>
+
+              {/* Text Content */}
+              <div className="relative z-10">
+                <h3 className="text-2xl font-bold text-white tracking-wide mb-1">{sub.name}</h3>
+                <p className="text-white/80 text-sm font-medium">View materials</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {/* Live Status */}
+      <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+        <div className="flex items-center mb-4">
+          <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-primary-500 mr-2 animate-pulse-slow" />
+          <h2 className="text-lg sm:text-xl font-bold">Live Status</h2>
+        </div>
+
+        {isHoliday ? (
+          <div className="p-6 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-xl flex items-center justify-center sm:justify-start">
+            <Calendar className="w-6 h-6 mr-3" />
+            <span className="font-semibold text-lg">It's a Holiday! Enjoy your day off.</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Current Period Card */}
+            <div className={`p-6 rounded-xl border-l-4 transition-all duration-300 hover:shadow-md ${currentPeriod ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'border-gray-400 bg-gray-50 dark:bg-gray-800'}`}>
+              <div className="flex justify-between items-start">
+                <div>
+                    <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Now Happening</p>
+                    {currentPeriod ? (
+                        <div>
+                        <h3 className="text-2xl sm:text-3xl font-bold text-green-700 dark:text-green-400 mb-1">{currentPeriod.subject}</h3>
+                        <p className="text-gray-600 dark:text-gray-400 font-medium">
+                            {formatTo12Hour(currentPeriod.startTime)} - {formatTo12Hour(currentPeriod.endTime)}
+                        </p>
+                        </div>
+                    ) : (
+                        <p className="text-xl font-semibold text-gray-500 py-2">Free Period / Break</p>
+                    )}
+                </div>
+                {currentPeriod && <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>}
+              </div>
+            </div>
+
+            {/* Next Period Card */}
+            <div className="p-6 rounded-xl border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 transition-all duration-300 hover:shadow-md">
+              <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Up Next</p>
+              {nextPeriod ? (
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-400 mb-1">{nextPeriod.subject}</h3>
+                  <p className="text-gray-600 dark:text-gray-400 font-medium">
+                    {formatTo12Hour(nextPeriod.startTime)} - {formatTo12Hour(nextPeriod.endTime)}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-lg font-semibold text-gray-500 py-2">No more classes today</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Visual Timetable "Photo" */}
+      <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm overflow-hidden">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-2">
+          <div className="flex items-center">
+            <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-primary-500 mr-2" />
+            <h2 className="text-lg sm:text-xl font-bold">Timetable View</h2>
+          </div>
+          <span className="text-xs sm:text-sm px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full font-medium border border-gray-200 dark:border-gray-700">
+            Current: {settings.batch}
+          </span>
+        </div>
+        
+        {/* Mock "Photo" representation of the data table */}
+        <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-inner bg-gray-50 dark:bg-gray-900/50">
+          <table className="w-full text-xs sm:text-sm text-left">
+            <thead className="bg-gray-100 dark:bg-gray-800 uppercase font-bold text-gray-700 dark:text-gray-300">
+              <tr>
+                <th className="px-3 py-3 sm:px-4 sm:py-4 sticky left-0 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shadow-sm">Day</th>
+                {[1,2,3,4,5,6].map(i => <th key={i} className="px-3 py-3 sm:px-4 sm:py-4 text-center">Pd {i}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {timetable[settings.batch].map((daySchedule, idx) => (
+                <tr key={idx} className="hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                  <td className="px-3 py-3 sm:px-4 sm:py-4 font-bold sticky left-0 bg-gray-50 dark:bg-dark-card border-r border-gray-200 dark:border-gray-700">
+                    {daySchedule.day.substring(0, 3)}
+                  </td>
+                  {daySchedule.periods.map((p, pIdx) => (
+                    <td key={pIdx} className="px-3 py-3 sm:px-4 sm:py-4 min-w-[100px] text-center">
+                      <div className="flex flex-col items-center">
+                        <span className="font-bold text-primary-700 dark:text-primary-400 mb-1">{p.subject}</span>
+                        <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                          {formatTo12Hour(p.startTime)}-{formatTo12Hour(p.endTime)}
+                        </span>
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
