@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SubjectType } from '../types';
-import { createSubjectChat } from '../services/geminiService';
-import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText } from 'lucide-react';
+import { createSubjectChat, generateVisualContent } from '../services/geminiService';
+import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText, Loader2, ImagePlus } from 'lucide-react';
 import { Chat } from "@google/genai";
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
+  image?: string; // Base64 image data
+  isGeneratingImage?: boolean; // UI state for loading image
 }
 
 export const Subject: React.FC = () => {
@@ -34,7 +36,7 @@ export const Subject: React.FC = () => {
     setMessages([{
       id: 'welcome',
       role: 'model',
-      text: `Hello! I'm your AI tutor for ${subjectName}. How can I help you study today?`
+      text: `Hello! I'm your AI tutor for ${subjectName}. Ask me anything, or ask for a diagram to visualize a concept!`
     }]);
   }, [subjectName]);
 
@@ -47,10 +49,11 @@ export const Subject: React.FC = () => {
     e?.preventDefault();
     if (!inputValue.trim() || !chatSession || isLoading) return;
 
+    const userText = inputValue;
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      text: inputValue
+      text: userText
     };
 
     setMessages(prev => [...prev, userMsg]);
@@ -58,13 +61,71 @@ export const Subject: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const result = await chatSession.sendMessage({ message: userMsg.text });
-      const modelMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+      // 1. Send text message
+      const result = await chatSession.sendMessage({ message: userText });
+      
+      // 2. Add the text response immediately
+      const modelText = result.text || "";
+      const modelMsgId = (Date.now() + 1).toString();
+      
+      setMessages(prev => [...prev, {
+        id: modelMsgId,
         role: 'model',
-        text: result.text || "I'm sorry, I couldn't generate a response."
-      };
-      setMessages(prev => [...prev, modelMsg]);
+        text: modelText
+      }]);
+
+      // 3. Check for Function Calls (Tool Usage)
+      const functionCalls = result.functionCalls;
+      if (functionCalls && functionCalls.length > 0) {
+        for (const call of functionCalls) {
+          if (call.name === 'generate_image') {
+             const prompt = (call.args as any).prompt;
+             
+             // Add a temporary "Generating image..." indicator
+             const imgLoadingId = (Date.now() + 2).toString();
+             setMessages(prev => [...prev, {
+                id: imgLoadingId,
+                role: 'model',
+                text: `🎨 Generating a diagram for: "${prompt}"...`,
+                isGeneratingImage: true
+             }]);
+
+             // Execute the actual image generation
+             const base64Image = await generateVisualContent(prompt);
+
+             // Remove loading, add actual image message
+             setMessages(prev => {
+                const filtered = prev.filter(m => m.id !== imgLoadingId);
+                if (base64Image) {
+                    return [...filtered, {
+                        id: (Date.now() + 3).toString(),
+                        role: 'model',
+                        text: `Here is the visual for: ${prompt}`,
+                        image: base64Image
+                    }];
+                } else {
+                    return [...filtered, {
+                        id: (Date.now() + 3).toString(),
+                        role: 'model',
+                        text: `(I tried to generate an image for "${prompt}" but encountered an issue. Please try again.)`
+                    }];
+                }
+             });
+
+             // Send tool response back to AI to maintain conversation state
+             // We send a simple "success" so the AI knows it showed the image
+             await chatSession.sendMessage({
+                 parts: [{
+                     functionResponse: {
+                         name: call.name,
+                         response: { result: "Image displayed to user successfully." }
+                     }
+                 }]
+             });
+          }
+        }
+      }
+
     } catch (error) {
       console.error("Chat Error:", error);
       setMessages(prev => [...prev, {
@@ -79,28 +140,25 @@ export const Subject: React.FC = () => {
 
   const handleDownload = async (url: string, filename: string) => {
     try {
-      // Fetch the file as a blob to force download behavior
       const response = await fetch(url);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
-      
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = filename;
       document.body.appendChild(link);
       link.click();
-      
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Download failed:', error);
-      // Fallback: open in new tab
       window.open(url, '_blank');
     }
   };
 
   // Simple formatter for bold text from markdown (**text**)
   const formatMessage = (text: string) => {
+    if (!text) return null;
     const parts = text.split(/(\*\*.*?\*\*)/g);
     return parts.map((part, index) => {
       if (part.startsWith('**') && part.endsWith('**')) {
@@ -198,21 +256,59 @@ export const Subject: React.FC = () => {
             <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 custom-scrollbar">
                 {messages.map((msg) => (
                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
-                        <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 shadow-sm flex items-start gap-3 ${
+                        <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 shadow-sm flex flex-col gap-2 ${
                             msg.role === 'user' 
                                 ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white rounded-tr-none' 
                                 : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-tl-none'
                         }`}>
-                            <div className={`mt-1 flex-shrink-0 ${msg.role === 'user' ? 'order-2' : ''}`}>
-                                {msg.role === 'user' ? <User className="w-5 h-5 opacity-90" /> : <Bot className="w-5 h-5 text-purple-500" />}
-                            </div>
-                            <div className={`text-sm sm:text-base leading-relaxed whitespace-pre-wrap ${msg.role === 'model' ? 'text-gray-800 dark:text-gray-200' : 'text-white'}`}>
-                                {formatMessage(msg.text)}
+                            <div className="flex items-start gap-3">
+                                <div className={`mt-1 flex-shrink-0 ${msg.role === 'user' ? 'order-2' : ''}`}>
+                                    {msg.role === 'user' ? <User className="w-5 h-5 opacity-90" /> : <Bot className="w-5 h-5 text-purple-500" />}
+                                </div>
+                                
+                                <div className="flex-grow">
+                                    {/* Text Content */}
+                                    {msg.text && (
+                                        <div className={`text-sm sm:text-base leading-relaxed whitespace-pre-wrap ${msg.role === 'model' ? 'text-gray-800 dark:text-gray-200' : 'text-white'}`}>
+                                            {formatMessage(msg.text)}
+                                        </div>
+                                    )}
+
+                                    {/* Loading State for Image */}
+                                    {msg.isGeneratingImage && (
+                                        <div className="mt-3 flex items-center space-x-2 text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg animate-pulse">
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            <span className="text-xs font-semibold">AI Artist is working...</span>
+                                        </div>
+                                    )}
+
+                                    {/* Generated Image */}
+                                    {msg.image && (
+                                        <div className="mt-3 relative group">
+                                            <img 
+                                                src={msg.image} 
+                                                alt="AI Generated" 
+                                                className="rounded-lg shadow-md max-w-full h-auto border border-gray-200 dark:border-gray-700"
+                                            />
+                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <a 
+                                                    href={msg.image} 
+                                                    download={`ai-diagram-${Date.now()}.png`}
+                                                    className="bg-white/90 dark:bg-black/80 p-1.5 rounded-full hover:bg-white dark:hover:bg-black text-gray-700 dark:text-white"
+                                                    title="Download Image"
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                </a>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
                 ))}
-                {isLoading && (
+                
+                {isLoading && !messages[messages.length-1]?.isGeneratingImage && (
                     <div className="flex justify-start animate-pulse">
                          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-tl-none p-4 shadow-sm flex items-center gap-3">
                             <Bot className="w-5 h-5 text-purple-500" />
@@ -234,7 +330,7 @@ export const Subject: React.FC = () => {
                         type="text" 
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        placeholder={`Ask anything about ${subjectName}...`}
+                        placeholder={`Ask for a diagram, circuit, or explanation...`}
                         className="flex-grow p-4 pr-12 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 outline-none dark:text-white placeholder-gray-500 transition-all"
                         disabled={isLoading}
                     />
@@ -246,9 +342,15 @@ export const Subject: React.FC = () => {
                         <Send className="w-5 h-5" />
                     </button>
                 </div>
-                <p className="text-center text-[10px] sm:text-xs text-gray-400 mt-2">
-                    AI can make mistakes. Please verify important information.
-                </p>
+                <div className="flex justify-between items-center mt-2 px-1">
+                     <p className="text-[10px] sm:text-xs text-gray-400">
+                        AI can make mistakes. Verify important info.
+                    </p>
+                    <div className="flex items-center text-[10px] sm:text-xs text-purple-600 dark:text-purple-400 font-medium">
+                        <ImagePlus className="w-3 h-3 mr-1" />
+                        <span>Supports Image Generation</span>
+                    </div>
+                </div>
             </form>
         </div>
       )}
