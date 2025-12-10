@@ -1,6 +1,9 @@
 import { GoogleGenAI, Chat } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Use the provided key, falling back to env var if present
+const apiKey = process.env.API_KEY || 'AIzaSyARwSO6VjOYIRIDQy4U2oEqF2tf0m95aC0';
+
+const ai = new GoogleGenAI({ apiKey });
 
 export const createSubjectChat = (subject: string): Chat => {
   return ai.chats.create({
