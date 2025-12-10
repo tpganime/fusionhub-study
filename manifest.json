@@ -1,13 +1,13 @@
 {
   "name": "FusionHub Study",
   "short_name": "FusionHub",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0ea5e9",
   "description": "Comprehensive study material platform with video uploads and timetable management.",
-  "orientation": "portrait-primary",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "/logo.svg",

@@ -1,24 +1,22 @@
 // Service Worker for FusionHub PWA
-const CACHE_NAME = 'fusionhub-v2';
+const CACHE_NAME = 'fusionhub-v3';
 const urlsToCache = [
-  './',
-  './index.html',
-  './logo.svg',
-  './manifest.json'
+  '/',
+  '/index.html',
+  '/logo.svg',
+  '/manifest.json'
 ];
 
-// Install Event: Cache core assets
+// Install: Cache core app shell
 self.addEventListener('install', (event) => {
-  self.skipWaiting(); // Force activation
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
-        return cache.addAll(urlsToCache);
-      })
+      .then((cache) => cache.addAll(urlsToCache))
   );
 });
 
-// Activate Event: Clean up old caches
+// Activate: Cleanup old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -34,44 +32,48 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch Event: Network First for API/Dynamic, Cache First for Static
+// Fetch: Hybrid Strategy
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // For Supabase or API calls, use Network only (or handle differently)
+  // 1. Navigation Requests (HTML): Network First -> Fallback to Cache -> Fallback to /index.html
+  // This fixes the 404 on PWA start if the specific path isn't cached
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => {
+          return caches.match(event.request)
+            .then((cachedRes) => {
+              if (cachedRes) return cachedRes;
+              // If not in cache and network failed, serve index.html (SPA support)
+              return caches.match('/index.html');
+            });
+        })
+    );
+    return;
+  }
+
+  // 2. Ignore API/Supabase calls (Network Only)
   if (url.hostname.includes('supabase.co') || url.hostname.includes('googleapis.com')) {
     return;
   }
 
+  // 3. Static Assets (Images, JS, CSS): Stale-While-Revalidate
+  // Serve from cache immediately, then update cache in background
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached response if found
-        if (response) {
-          return response;
+    caches.match(event.request).then((cachedResponse) => {
+      const fetchPromise = fetch(event.request).then((networkResponse) => {
+        // Update cache with new version
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
         }
-        
-        // Otherwise fetch from network
-        return fetch(event.request).then(
-          (response) => {
-            // Check if we received a valid response
-            if(!response || response.status !== 200 || response.type !== 'basic') {
-              return response;
-            }
-
-            // Clone the response to cache it
-            const responseToCache = response.clone();
-
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                // Don't cache hot updates or very dynamic things if possible, 
-                // but for simple apps, caching everything visited is a simple strategy.
-                cache.put(event.request, responseToCache);
-              });
-
-            return response;
-          }
-        );
-      })
+        return networkResponse;
+      });
+      // Return cached response if available, otherwise wait for network
+      return cachedResponse || fetchPromise;
+    })
   );
 });

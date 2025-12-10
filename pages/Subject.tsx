@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { SubjectType } from '../types';
+import { SubjectType, StudyMaterial } from '../types';
 import { createSubjectChat, generateVisualContent } from '../services/geminiService';
-import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText, Loader2, ImagePlus } from 'lucide-react';
+import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText, Loader2, ImagePlus, X, Eye, ExternalLink, PlayCircle } from 'lucide-react';
 import { Chat } from "@google/genai";
 
 interface ChatMessage {
@@ -19,6 +19,9 @@ export const Subject: React.FC = () => {
   const { materials } = useApp();
   const [activeTab, setActiveTab] = useState<'content' | 'ai'>('content');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Preview Modal State
+  const [previewItem, setPreviewItem] = useState<StudyMaterial | null>(null);
   
   // AI Chat State
   const [chatSession, setChatSession] = useState<Chat | null>(null);
@@ -145,7 +148,8 @@ export const Subject: React.FC = () => {
     }
   };
 
-  const handleDownload = async (url: string, filename: string) => {
+  const handleDownload = async (e: React.MouseEvent, url: string, filename: string) => {
+    e.stopPropagation(); // Prevent opening modal when clicking download
     try {
       const response = await fetch(url);
       const blob = await response.blob();
@@ -161,6 +165,16 @@ export const Subject: React.FC = () => {
       console.error('Download failed:', error);
       window.open(url, '_blank');
     }
+  };
+
+  const handleItemClick = (item: StudyMaterial) => {
+      if (item.type === 'note') {
+          // PDFs usually open better in a new tab
+          window.open(item.url, '_blank');
+      } else {
+          // Photos and Videos open in modal
+          setPreviewItem(item);
+      }
   };
 
   // Simple formatter for bold text from markdown (**text**)
@@ -193,6 +207,56 @@ export const Subject: React.FC = () => {
 
   return (
     <div className="space-y-6 h-[calc(100vh-140px)] flex flex-col animate-fade-in-up">
+      {/* --- Preview Modal --- */}
+      {previewItem && (
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in-up">
+            <button 
+                onClick={() => setPreviewItem(null)}
+                className="absolute top-4 right-4 p-2 bg-gray-800 text-white rounded-full hover:bg-gray-700 transition-colors z-[110]"
+            >
+                <X className="w-6 h-6" />
+            </button>
+            
+            <div className="w-full max-w-4xl max-h-full flex flex-col items-center">
+                {previewItem.type === 'photo' && (
+                    <img 
+                        src={previewItem.url} 
+                        alt={previewItem.title} 
+                        className="max-h-[85vh] max-w-full object-contain rounded-lg shadow-2xl"
+                    />
+                )}
+                {previewItem.type === 'video' && (
+                    <video 
+                        src={previewItem.url} 
+                        controls 
+                        autoPlay
+                        className="max-h-[85vh] max-w-full rounded-lg shadow-2xl"
+                    />
+                )}
+                <div className="mt-4 flex gap-4">
+                    <button
+                        onClick={(e) => handleDownload(e, previewItem.url, previewItem.title)}
+                        className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-medium text-sm"
+                    >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download Original
+                    </button>
+                    {previewItem.type === 'note' && (
+                        <a
+                            href={previewItem.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-medium text-sm"
+                        >
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Open in New Tab
+                        </a>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
+
       <div className="flex-none space-y-4">
         <Link to="/" className="inline-flex items-center text-primary-500 hover:text-primary-600 hover:underline transition-colors">
             <ArrowLeft className="w-4 h-4 mr-1" /> Back to Home
@@ -246,26 +310,35 @@ export const Subject: React.FC = () => {
               filteredMaterials.map((item, idx) => (
                   <div 
                       key={item.id} 
-                      className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1"
+                      onClick={() => handleItemClick(item)}
+                      className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-lg hover:border-primary-500/30 transition-all duration-300 transform hover:-translate-y-1 cursor-pointer group"
                       style={{ animationDelay: `${idx * 100}ms` }}
                   >
                       <div className="flex items-center space-x-4 w-full sm:w-auto">
-                          <div className={`p-4 rounded-xl flex-shrink-0 ${getMaterialColor(item.type)}`}>
+                          <div className={`p-4 rounded-xl flex-shrink-0 ${getMaterialColor(item.type)} relative`}>
                               {getMaterialIcon(item.type)}
+                              {item.type !== 'note' && (
+                                <div className="absolute inset-0 bg-black/10 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {item.type === 'video' ? <PlayCircle className="w-8 h-8 text-white drop-shadow-md" /> : <Eye className="w-6 h-6 text-white drop-shadow-md" />}
+                                </div>
+                              )}
                           </div>
                           <div className="overflow-hidden">
-                              <h3 className="font-bold text-lg dark:text-gray-200 truncate pr-2">{item.title}</h3>
+                              <h3 className="font-bold text-lg dark:text-gray-200 truncate pr-2 group-hover:text-primary-500 transition-colors">{item.title}</h3>
                               <p className="text-xs text-gray-500 font-medium mt-1 flex items-center">
                                   <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded mr-2 uppercase">{item.type}</span>
                                   <span>{item.size}</span>
                                   <span className="mx-2">•</span>
                                   {new Date(item.uploadDate).toLocaleDateString()}
+                                  <span className="hidden sm:inline-block ml-3 text-primary-500 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {item.type === 'note' ? 'OPEN IN NEW TAB' : 'CLICK TO VIEW'}
+                                  </span>
                               </p>
                           </div>
                       </div>
                       <button 
-                          onClick={() => handleDownload(item.url, item.title)}
-                          className="mt-4 sm:mt-0 w-full sm:w-auto flex items-center justify-center px-4 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm font-bold transition dark:text-gray-300"
+                          onClick={(e) => handleDownload(e, item.url, item.title)}
+                          className="mt-4 sm:mt-0 w-full sm:w-auto flex items-center justify-center px-4 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm font-bold transition dark:text-gray-300 z-10"
                       >
                           <Download className="w-4 h-4 mr-2" /> Download
                       </button>
@@ -312,7 +385,16 @@ export const Subject: React.FC = () => {
                                             <img 
                                                 src={msg.image} 
                                                 alt="AI Generated" 
-                                                className="rounded-lg shadow-md max-w-full h-auto border border-gray-200 dark:border-gray-700"
+                                                className="rounded-lg shadow-md max-w-full h-auto border border-gray-200 dark:border-gray-700 cursor-pointer"
+                                                onClick={() => setPreviewItem({
+                                                    id: 'ai-gen',
+                                                    title: 'AI Generated Diagram',
+                                                    type: 'photo',
+                                                    subject: subjectName,
+                                                    size: 'N/A',
+                                                    uploadDate: new Date().toISOString(),
+                                                    url: msg.image!
+                                                })}
                                             />
                                             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <a 
