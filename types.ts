@@ -5,7 +5,8 @@ export enum SubjectType {
   CSE = 'CSE',
   MATHS = 'Maths',
   FICT = 'FICT',
-  LIBRARY = 'Library'
+  LIBRARY = 'Library',
+  FREE = 'Free Period'
 }
 
 export enum Batch {

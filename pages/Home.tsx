@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SUBJECTS } from '../constants';
 import { Period, SubjectType, Batch } from '../types';
-import { Clock, Calendar, Cpu, Zap, FlaskConical, Code, Calculator, BookOpen, FileText } from 'lucide-react';
+import { Clock, Calendar, Cpu, Zap, FlaskConical, Code, Calculator, BookOpen, FileText, Coffee } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
 export const Home: React.FC = () => {
@@ -147,6 +147,7 @@ export const Home: React.FC = () => {
       case SubjectType.MATHS: return <Calculator className="w-10 h-10 text-white stroke-[1.5]" />;
       case SubjectType.LIBRARY: return <BookOpen className="w-10 h-10 text-white stroke-[1.5]" />;
       case SubjectType.FICT: return <FileText className="w-10 h-10 text-white stroke-[1.5]" />;
+      case SubjectType.FREE: return <Coffee className="w-10 h-10 text-white stroke-[1.5]" />;
       default: return <Cpu className="w-10 h-10 text-white stroke-[1.5]" />;
     }
   };
@@ -171,8 +172,8 @@ export const Home: React.FC = () => {
         </div>
       </div>
 
-      {/* Live Status - Order 2 on Mobile, Order 3 on Desktop */}
-      <div className="order-2 md:order-3 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+      {/* Live Status - Order 2 */}
+      <div className="order-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
         <div className="flex items-center mb-4">
           <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-primary-500 mr-2 animate-pulse-slow" />
           <h2 className="text-lg sm:text-xl font-bold">Live Status</h2>
@@ -237,38 +238,8 @@ export const Home: React.FC = () => {
         )}
       </div>
 
-      {/* Subject Grid - Order 3 on Mobile, Order 2 on Desktop */}
-      <div className="order-3 md:order-2">
-        <h2 className="text-xl sm:text-2xl font-bold mb-4 px-1">Study Subjects</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-          {SUBJECTS.map((sub, index) => (
-            <Link 
-              key={sub.id} 
-              to={`/subject/${sub.id}`}
-              className={`group relative overflow-hidden rounded-2xl p-6 h-48 shadow-lg transition-transform hover:scale-[1.02] duration-300 flex flex-col justify-between ${sub.color}`}
-              style={{ animationDelay: `${index * 50}ms` }}
-            >
-              {/* Decorative Circles Overlay */}
-              <div className="absolute -bottom-8 -right-8 w-32 h-32 bg-white opacity-10 rounded-full blur-none group-hover:scale-110 transition-transform duration-500"></div>
-              <div className="absolute bottom-8 -right-12 w-32 h-32 bg-white opacity-5 rounded-full blur-xl group-hover:scale-110 transition-transform duration-500"></div>
-
-              {/* Icon */}
-              <div className="relative z-10">
-                {getSubjectIcon(sub.id)}
-              </div>
-
-              {/* Text Content */}
-              <div className="relative z-10">
-                <h3 className="text-2xl font-bold text-white tracking-wide mb-1">{sub.name}</h3>
-                <p className="text-white/80 text-sm font-medium">View materials</p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Visual Timetable "Photo" - Order 4 */}
-      <div className="order-4 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm overflow-hidden">
+      {/* Visual Timetable "Photo" - Order 3 (Moved Up) */}
+      <div className="order-3 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-2">
           <div className="flex items-center">
             <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-primary-500 mr-2" />
@@ -296,15 +267,31 @@ export const Home: React.FC = () => {
                   </td>
                   {daySchedule.periods.map((p, pIdx) => {
                     const badge = getBatchBadge(idx, pIdx);
+                    // Determine if we need to show other batch subject too
+                    const currentBatch = settings.batch;
+                    const otherBatch = currentBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
+                    const otherSubject = timetable[otherBatch][idx]?.periods[pIdx]?.subject;
+                    const isDifferent = otherSubject && otherSubject !== p.subject;
+
                     return (
                         <td key={pIdx} className="px-3 py-3 sm:px-4 sm:py-4 min-w-[100px] text-center">
                         <div className="flex flex-col items-center">
-                            <div className="flex items-center gap-1 mb-1">
-                                <span className="font-bold text-primary-700 dark:text-primary-400">{p.subject}</span>
-                                {badge && (
-                                    <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 px-1 rounded">
-                                        {badge}
-                                    </span>
+                            <div className="flex flex-col items-center gap-0.5 mb-1">
+                                <div className="flex items-center gap-1">
+                                    <span className="font-bold text-primary-700 dark:text-primary-400">{p.subject}</span>
+                                    {badge && (
+                                        <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 px-1 rounded">
+                                            {badge}
+                                        </span>
+                                    )}
+                                </div>
+                                {isDifferent && (
+                                     <div className="flex items-center gap-1 opacity-60 scale-90">
+                                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{otherSubject}</span>
+                                        <span className="text-[9px] font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1 rounded">
+                                            {currentBatch === Batch.BATCH_1 ? 'B2' : 'B1'}
+                                        </span>
+                                    </div>
                                 )}
                             </div>
                             <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
@@ -318,6 +305,36 @@ export const Home: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Subject Grid - Order 4 (Moved Down) */}
+      <div className="order-4">
+        <h2 className="text-xl sm:text-2xl font-bold mb-4 px-1">Study Subjects</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {SUBJECTS.map((sub, index) => (
+            <Link 
+              key={sub.id} 
+              to={`/subject/${sub.id}`}
+              className={`group relative overflow-hidden rounded-2xl p-6 h-48 shadow-lg transition-transform hover:scale-[1.02] duration-300 flex flex-col justify-between ${sub.color}`}
+              style={{ animationDelay: `${index * 50}ms` }}
+            >
+              {/* Decorative Circles Overlay */}
+              <div className="absolute -bottom-8 -right-8 w-32 h-32 bg-white opacity-10 rounded-full blur-none group-hover:scale-110 transition-transform duration-500"></div>
+              <div className="absolute bottom-8 -right-12 w-32 h-32 bg-white opacity-5 rounded-full blur-xl group-hover:scale-110 transition-transform duration-500"></div>
+
+              {/* Icon */}
+              <div className="relative z-10">
+                {getSubjectIcon(sub.id)}
+              </div>
+
+              {/* Text Content */}
+              <div className="relative z-10">
+                <h3 className="text-2xl font-bold text-white tracking-wide mb-1">{sub.name}</h3>
+                <p className="text-white/80 text-sm font-medium">View materials</p>
+              </div>
+            </Link>
+          ))}
         </div>
       </div>
     </div>
