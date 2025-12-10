@@ -21,6 +21,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <div className="flex justify-between h-16 items-center">
             {/* Logo */}
             <Link to="/" className="flex items-center space-x-2 group">
+              <img src="/logo.svg" alt="FusionHub Logo" className="w-8 h-8 sm:w-10 sm:h-10 transition-transform duration-200 group-hover:rotate-12" />
               <span className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-500 to-purple-600 group-hover:scale-105 transition-transform duration-200">
                 FusionHub
               </span>
