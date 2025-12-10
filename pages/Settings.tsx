@@ -1,29 +1,68 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Batch } from '../types';
-import { Moon, Sun, Users, Bell, BellOff } from 'lucide-react';
+import { Moon, Sun, Users, Bell } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const { settings, updateSettings } = useApp();
 
-  const toggleNotifications = async () => {
-    if (!settings.notificationsEnabled) {
-      // Trying to enable
-      if (!("Notification" in window)) {
-        alert("This browser does not support desktop notifications");
-        return;
-      }
+  // Sync state with actual browser permission on mount
+  useEffect(() => {
+    if (settings.notificationsEnabled && "Notification" in window && Notification.permission !== 'granted') {
+      // If setting is ON but browser says NO, turn setting OFF
+      updateSettings({ notificationsEnabled: false });
+    }
+  }, [settings.notificationsEnabled, updateSettings]);
 
+  const toggleNotifications = async () => {
+    // 1. If currently enabled, just turn off
+    if (settings.notificationsEnabled) {
+      updateSettings({ notificationsEnabled: false });
+      return;
+    }
+
+    // 2. Browser support check
+    if (!("Notification" in window)) {
+      alert("This browser does not support desktop notifications.");
+      return;
+    }
+
+    // 3. Check current permission status
+    if (Notification.permission === 'granted') {
+      // Already granted, just enable setting
+      updateSettings({ notificationsEnabled: true });
+      try {
+        new Notification("Notifications Active", { body: "You will receive alerts for class periods." });
+      } catch (e) {
+        console.warn("Notification test failed:", e);
+      }
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      // Blocked - guide user to fix it
+      alert("Notifications are blocked for this site.\n\nPlease click the lock icon (🔒) in your browser address bar and set Notifications to 'Allow', then try again.");
+      return;
+    }
+
+    // 4. Permission is 'default', so ASK the user
+    try {
       const permission = await Notification.requestPermission();
+      
       if (permission === 'granted') {
         updateSettings({ notificationsEnabled: true });
-        new Notification("Notifications Enabled", { body: "You will now receive alerts for period changes." });
+        try {
+          new Notification("Notifications Enabled", { body: "You will receive alerts for class periods." });
+        } catch (e) {
+          console.warn("Notification test failed:", e);
+        }
       } else {
-        alert("Permission denied. Please enable notifications in your browser settings.");
+        // User clicked Block or X
+        updateSettings({ notificationsEnabled: false });
       }
-    } else {
-      // Disabling
-      updateSettings({ notificationsEnabled: false });
+    } catch (error) {
+      console.error("Error requesting permission:", error);
+      alert("Something went wrong requesting permissions. Please check your browser settings.");
     }
   };
 
@@ -77,6 +116,11 @@ export const SettingsPage: React.FC = () => {
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
+          {!settings.notificationsEnabled && Notification.permission === 'denied' && (
+            <p className="text-xs text-red-500 mt-2 px-1">
+              * Notifications are blocked in browser settings.
+            </p>
+          )}
         </div>
 
         <hr className="border-gray-100 dark:border-gray-700" />

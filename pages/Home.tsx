@@ -77,11 +77,16 @@ export const Home: React.FC = () => {
         if (settings.notificationsEnabled) {
           // If we haven't notified for this specific period ID yet
           if (lastNotifiedPeriodRef.current !== current.id) {
-             if (Notification.permission === 'granted') {
-                new Notification(`Class Started: ${current.subject}`, {
-                   body: `${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
-                   icon: '/favicon.ico' // Falls back to browser default if missing
-                });
+             // Only try to send if permission is explicitly granted
+             if ("Notification" in window && Notification.permission === 'granted') {
+                try {
+                  new Notification(`Class Started: ${current.subject}`, {
+                     body: `${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
+                     icon: '/favicon.ico' // Falls back to browser default if missing
+                  });
+                } catch (e) {
+                  console.warn("Notification failed to send:", e);
+                }
              }
              lastNotifiedPeriodRef.current = current.id;
           }
