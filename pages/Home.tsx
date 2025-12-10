@@ -103,10 +103,17 @@ export const Home: React.FC = () => {
              // Only try to send if permission is explicitly granted
              if ("Notification" in window && Notification.permission === 'granted') {
                 try {
+                  // 1. Visual Notification
                   new Notification(`Class Started: ${current.subject}`, {
                      body: `${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
                      icon: '/favicon.ico' // Falls back to browser default if missing
                   });
+                  
+                  // 2. Audio Notification
+                  const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3');
+                  audio.volume = 0.5;
+                  audio.play().catch(e => console.warn("Audio play failed (autoplay blocked):", e));
+
                 } catch (e) {
                   console.warn("Notification failed to send:", e);
                 }
