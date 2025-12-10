@@ -8,10 +8,11 @@ import { formatTo12Hour } from '../utils/helpers';
 
 export const Home: React.FC = () => {
   const { settings, timetable } = useApp();
-  const [currentPeriod, setCurrentPeriod] = useState<Period | null>(null);
-  const [nextPeriod, setNextPeriod] = useState<Period | null>(null);
-  const [currentBadge, setCurrentBadge] = useState<string | null>(null);
-  const [nextBadge, setNextBadge] = useState<string | null>(null);
+  
+  // State to track periods for BOTH batches
+  const [statusB1, setStatusB1] = useState<{ current: Period | null, next: Period | null }>({ current: null, next: null });
+  const [statusB2, setStatusB2] = useState<{ current: Period | null, next: Period | null }>({ current: null, next: null });
+
   const [isHoliday, setIsHoliday] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -58,8 +59,8 @@ export const Home: React.FC = () => {
 
       if (checkIsOffDay(now)) {
         setIsHoliday(true);
-        setCurrentPeriod(null);
-        setNextPeriod(null);
+        setStatusB1({ current: null, next: null });
+        setStatusB2({ current: null, next: null });
         lastNotifiedPeriodRef.current = null;
         return;
       } else {
@@ -71,42 +72,55 @@ export const Home: React.FC = () => {
       let dayIndex = now.getDay() - 1; 
       if (dayIndex < 0 || dayIndex > 5) {
         // Sunday
-        setCurrentPeriod(null);
-        setNextPeriod(null);
+        setStatusB1({ current: null, next: null });
+        setStatusB2({ current: null, next: null });
         lastNotifiedPeriodRef.current = null;
         return;
       }
 
-      const todaySchedule = timetable[settings.batch][dayIndex];
-      // Keep internal comparison in 24h format for accuracy
       const timeString = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-      const current = todaySchedule.periods.find(p => timeString >= p.startTime && timeString < p.endTime);
-      
-      if (current) {
-        setCurrentPeriod(current);
-        const currentIndex = todaySchedule.periods.indexOf(current);
-        setCurrentBadge(getBatchBadge(dayIndex, currentIndex));
+      // Helper to find periods for a specific batch schedule
+      const findPeriods = (batch: Batch) => {
+          const schedule = timetable[batch][dayIndex];
+          const current = schedule.periods.find(p => timeString >= p.startTime && timeString < p.endTime) || null;
+          
+          let next = null;
+          if (current) {
+              const currentIndex = schedule.periods.indexOf(current);
+              if (currentIndex < schedule.periods.length - 1) {
+                  next = schedule.periods[currentIndex + 1];
+              }
+          } else {
+             // Check if before first period
+            const first = schedule.periods[0];
+            if (first && timeString < first.startTime) {
+                next = first;
+            }
+          }
+          return { current, next };
+      };
 
-        if (currentIndex < todaySchedule.periods.length - 1) {
-          setNextPeriod(todaySchedule.periods[currentIndex + 1]);
-          setNextBadge(getBatchBadge(dayIndex, currentIndex + 1));
-        } else {
-          setNextPeriod(null);
-          setNextBadge(null);
-        }
+      const b1 = findPeriods(Batch.BATCH_1);
+      const b2 = findPeriods(Batch.BATCH_2);
 
-        // --- Notification Logic ---
-        if (settings.notificationsEnabled) {
+      setStatusB1(b1);
+      setStatusB2(b2);
+
+      // --- Notification Logic (Based on User's Selected Batch) ---
+      const userBatchStatus = settings.batch === Batch.BATCH_1 ? b1 : b2;
+      const currentPeriod = userBatchStatus.current;
+
+      if (settings.notificationsEnabled && currentPeriod) {
           // If we haven't notified for this specific period ID yet
-          if (lastNotifiedPeriodRef.current !== current.id) {
+          if (lastNotifiedPeriodRef.current !== currentPeriod.id) {
              // Only try to send if permission is explicitly granted
              if ("Notification" in window && Notification.permission === 'granted') {
                 try {
                   // 1. Visual Notification
-                  new Notification(`Class Started: ${current.subject}`, {
-                     body: `${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
-                     icon: '/favicon.ico' // Falls back to browser default if missing
+                  new Notification(`Class Started: ${currentPeriod.subject}`, {
+                     body: `${formatTo12Hour(currentPeriod.startTime)} - ${formatTo12Hour(currentPeriod.endTime)}\nBatch: ${settings.batch}`,
+                     icon: '/favicon.ico'
                   });
                   
                   // 2. Audio Notification
@@ -118,27 +132,14 @@ export const Home: React.FC = () => {
                   console.warn("Notification failed to send:", e);
                 }
              }
-             lastNotifiedPeriodRef.current = current.id;
+             lastNotifiedPeriodRef.current = currentPeriod.id;
           }
-        }
-
-      } else {
-        setCurrentPeriod(null);
-        setCurrentBadge(null);
-        // Check if before first period
-        const first = todaySchedule.periods[0];
-        if (timeString < first.startTime) {
-           setNextPeriod(first);
-           setNextBadge(getBatchBadge(dayIndex, 0));
-        } else {
-           setNextPeriod(null);
-           setNextBadge(null);
-        }
+      } else if (!currentPeriod) {
+          lastNotifiedPeriodRef.current = null;
       }
 
-    }, 1000); // Update every second for smooth clock
+    }, 1000); 
 
-    // Initial run
     const now = new Date();
     if(checkIsOffDay(now)) setIsHoliday(true);
     
@@ -159,6 +160,31 @@ export const Home: React.FC = () => {
     }
   };
 
+  // Render helper for status lines
+  const renderStatusLine = (label: string, period: Period | null, colorClass: string, bgClass: string) => {
+      if (!period) return (
+        <div className="flex justify-between items-center opacity-60">
+            <span className="font-semibold text-sm">{label}</span>
+            <span className="text-sm">Free / Break</span>
+        </div>
+      );
+      
+      return (
+          <div className="flex justify-between items-center">
+              <span className={`font-bold text-sm px-2 py-0.5 rounded ${bgClass} ${colorClass}`}>{label}</span>
+              <div className="text-right">
+                  <span className={`font-bold ${colorClass}`}>{period.subject}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                      {formatTo12Hour(period.startTime)} - {formatTo12Hour(period.endTime)}
+                  </span>
+              </div>
+          </div>
+      );
+  };
+
+  const isB1B2SameCurrent = statusB1.current?.subject === statusB2.current?.subject && statusB1.current?.subject != null;
+  const isB1B2SameNext = statusB1.next?.subject === statusB2.next?.subject && statusB1.next?.subject != null;
+
   return (
     <div className="flex flex-col space-y-6 sm:space-y-8 animate-fade-in-up pb-10">
       {/* Header Greeting - Order 1 */}
@@ -166,7 +192,7 @@ export const Home: React.FC = () => {
         <div className="text-center md:text-left">
           <h1 className="text-2xl sm:text-3xl font-bold mb-1 text-gray-900 dark:text-white">Welcome Back</h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
-            Batch: <span className="font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded ml-1">{settings.batch}</span>
+            Your Batch: <span className="font-bold bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded ml-1">{settings.batch}</span>
           </p>
         </div>
         <div className="mt-4 md:mt-0 text-center md:text-right">
@@ -194,58 +220,72 @@ export const Home: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Current Period Card */}
-            <div className={`p-6 rounded-xl border-l-4 transition-all duration-300 hover:shadow-md ${currentPeriod ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'border-gray-400 bg-gray-50 dark:bg-gray-800'}`}>
-              <div className="flex justify-between items-start">
-                <div>
-                    <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Now Happening</p>
-                    {currentPeriod ? (
-                        <div>
-                        <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-2xl sm:text-3xl font-bold text-green-700 dark:text-green-400">{currentPeriod.subject}</h3>
-                            {currentBadge && (
-                                <span className="text-xs font-bold bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-100 px-2 py-0.5 rounded-md">
-                                    {currentBadge}
-                                </span>
-                            )}
-                        </div>
-                        <p className="text-gray-600 dark:text-gray-400 font-medium">
-                            {formatTo12Hour(currentPeriod.startTime)} - {formatTo12Hour(currentPeriod.endTime)}
-                        </p>
-                        </div>
-                    ) : (
-                        <p className="text-xl font-semibold text-gray-500 py-2">Free Period / Break</p>
-                    )}
-                </div>
-                {currentPeriod && <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>}
+            <div className={`p-4 sm:p-6 rounded-xl border-l-4 transition-all duration-300 hover:shadow-md ${statusB1.current || statusB2.current ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'border-gray-400 bg-gray-50 dark:bg-gray-800'}`}>
+              <div className="flex justify-between items-center mb-3">
+                  <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 font-semibold">Now Happening</p>
+                  {(statusB1.current || statusB2.current) && <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>}
+              </div>
+              
+              <div className="space-y-3">
+                  {/* Common Schedule */}
+                  {isB1B2SameCurrent ? (
+                      <div>
+                          <div className="flex items-center gap-2">
+                              <h3 className="text-2xl sm:text-3xl font-bold text-green-700 dark:text-green-400">{statusB1.current?.subject}</h3>
+                              <span className="text-xs font-bold bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-100 px-2 py-0.5 rounded-md">Common</span>
+                          </div>
+                          <p className="text-gray-600 dark:text-gray-400 font-medium">
+                              {formatTo12Hour(statusB1.current?.startTime || '')} - {formatTo12Hour(statusB1.current?.endTime || '')}
+                          </p>
+                      </div>
+                  ) : (
+                      // Split Schedule
+                      <>
+                        {renderStatusLine("Batch 1", statusB1.current, "text-green-700 dark:text-green-400", "bg-green-100 dark:bg-green-900/30")}
+                        <hr className="border-gray-200 dark:border-gray-700/50" />
+                        {renderStatusLine("Batch 2", statusB2.current, "text-green-700 dark:text-green-400", "bg-green-100 dark:bg-green-900/30")}
+                      </>
+                  )}
+                  
+                  {!statusB1.current && !statusB2.current && (
+                      <p className="text-lg font-semibold text-gray-500">Free Period / Break</p>
+                  )}
               </div>
             </div>
 
             {/* Next Period Card */}
-            <div className="p-6 rounded-xl border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 transition-all duration-300 hover:shadow-md">
-              <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Up Next</p>
-              {nextPeriod ? (
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-400">{nextPeriod.subject}</h3>
-                    {nextBadge && (
-                        <span className="text-xs font-bold bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-md">
-                            {nextBadge}
-                        </span>
-                    )}
-                  </div>
-                  <p className="text-gray-600 dark:text-gray-400 font-medium">
-                    {formatTo12Hour(nextPeriod.startTime)} - {formatTo12Hour(nextPeriod.endTime)}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-lg font-semibold text-gray-500 py-2">No more classes today</p>
-              )}
+            <div className="p-4 sm:p-6 rounded-xl border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 transition-all duration-300 hover:shadow-md">
+              <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-3 font-semibold">Up Next</p>
+              
+              <div className="space-y-3">
+                   {isB1B2SameNext ? (
+                      <div>
+                          <div className="flex items-center gap-2">
+                              <h3 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-400">{statusB1.next?.subject}</h3>
+                              <span className="text-xs font-bold bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-md">Common</span>
+                          </div>
+                          <p className="text-gray-600 dark:text-gray-400 font-medium">
+                              {formatTo12Hour(statusB1.next?.startTime || '')} - {formatTo12Hour(statusB1.next?.endTime || '')}
+                          </p>
+                      </div>
+                  ) : (
+                      <>
+                        {renderStatusLine("Batch 1", statusB1.next, "text-blue-700 dark:text-blue-400", "bg-blue-100 dark:bg-blue-900/30")}
+                        <hr className="border-gray-200 dark:border-gray-700/50" />
+                        {renderStatusLine("Batch 2", statusB2.next, "text-blue-700 dark:text-blue-400", "bg-blue-100 dark:bg-blue-900/30")}
+                      </>
+                  )}
+
+                  {!statusB1.next && !statusB2.next && (
+                    <p className="text-lg font-semibold text-gray-500 py-1">No more classes today</p>
+                  )}
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Visual Timetable "Photo" - Order 3 (Moved Up) */}
+      {/* Visual Timetable "Photo" - Order 3 */}
       <div className="order-3 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-2">
           <div className="flex items-center">
@@ -253,11 +293,10 @@ export const Home: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold">Timetable View</h2>
           </div>
           <span className="text-xs sm:text-sm px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full font-medium border border-gray-200 dark:border-gray-700">
-            Current: {settings.batch}
+            Current View: {settings.batch}
           </span>
         </div>
         
-        {/* Mock "Photo" representation of the data table */}
         <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-inner bg-gray-50 dark:bg-gray-900/50">
           <table className="w-full text-xs sm:text-sm text-left">
             <thead className="bg-gray-100 dark:bg-gray-800 uppercase font-bold text-gray-700 dark:text-gray-300">
@@ -315,7 +354,7 @@ export const Home: React.FC = () => {
         </div>
       </div>
 
-      {/* Subject Grid - Order 4 (Moved Down) */}
+      {/* Subject Grid - Order 4 */}
       <div className="order-4">
         <h2 className="text-xl sm:text-2xl font-bold mb-4 px-1">Study Subjects</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">

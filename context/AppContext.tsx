@@ -14,6 +14,7 @@ interface AppContextType {
   materials: StudyMaterial[];
   addMaterial: (material: StudyMaterial) => Promise<void>;
   isLoadingData: boolean;
+  refreshMaterials: () => Promise<void>; // Added
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -32,7 +33,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Data from Supabase
   const [timetable, setTimetable] = useState<Timetable>(DEFAULT_TIMETABLE);
   // Use a Ref to hold the latest timetable state. This prevents stale closure issues
-  // when updateTimetable is called multiple times rapidly (e.g., for "Both Batches").
   const timetableRef = useRef<Timetable>(DEFAULT_TIMETABLE);
 
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
@@ -48,6 +48,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [settings]);
 
+  const fetchMaterials = async () => {
+      const { data: matData, error: matError } = await supabase
+        .from('materials')
+        .select('*')
+        .order('upload_date', { ascending: false });
+        
+      if (matData) {
+         const formattedMaterials: StudyMaterial[] = matData.map((m: any) => ({
+           id: m.id,
+           title: m.title,
+           subject: m.subject as SubjectType,
+           type: m.type as 'video' | 'photo' | 'note',
+           size: m.size,
+           uploadDate: m.upload_date || m.uploadDate,
+           url: m.url
+         }));
+         setMaterials(formattedMaterials);
+      }
+  };
+
   // Initial Data Fetch
   useEffect(() => {
     const fetchData = async () => {
@@ -55,23 +75,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setIsLoadingData(true);
         
         // 1. Fetch Materials
-        const { data: matData, error: matError } = await supabase
-          .from('materials')
-          .select('*')
-          .order('upload_date', { ascending: false });
-          
-        if (matData) {
-           const formattedMaterials: StudyMaterial[] = matData.map((m: any) => ({
-             id: m.id,
-             title: m.title,
-             subject: m.subject as SubjectType,
-             type: m.type as 'video' | 'photo' | 'note', // Cast to supported types
-             size: m.size,
-             uploadDate: m.upload_date || m.uploadDate, // handle both casing
-             url: m.url
-           }));
-           setMaterials(formattedMaterials);
-        }
+        await fetchMaterials();
 
         // 2. Fetch Timetable
         const { data: timeData, error: timeError } = await supabase
@@ -141,7 +145,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 3. Update React State to trigger re-render
     setTimetable(updatedTimetable);
 
-    // 4. Sync with Supabase (using the clean newSchedule for this specific batch)
+    // 4. Sync with Supabase
     try {
       await supabase
         .from('timetables')
@@ -170,6 +174,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const refreshMaterials = async () => {
+    await fetchMaterials();
+  };
+
   return (
     <AppContext.Provider value={{
       settings,
@@ -181,7 +189,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateTimetable,
       materials,
       addMaterial,
-      isLoadingData
+      isLoadingData,
+      refreshMaterials
     }}>
       {children}
     </AppContext.Provider>

@@ -3,11 +3,11 @@ import { useApp } from '../context/AppContext';
 import { ADMIN_CREDENTIALS, SUBJECTS } from '../constants';
 import { Batch, SubjectType } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Image as ImageIcon, Video } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Image as ImageIcon, Video, Link as LinkIcon, DownloadCloud, Plus } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
 export const Admin: React.FC = () => {
-  const { isAdmin, loginAdmin, addMaterial, timetable, updateTimetable } = useApp();
+  const { isAdmin, loginAdmin, addMaterial, timetable, updateTimetable, materials, refreshMaterials } = useApp();
   
   // Login State
   const [email, setEmail] = useState('');
@@ -20,6 +20,11 @@ export const Admin: React.FC = () => {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
+
+  // Import/Sync State
+  const [pendingImports, setPendingImports] = useState<any[]>([]);
+  const [isLoadingImports, setIsLoadingImports] = useState(false);
+  const [importInputs, setImportInputs] = useState<{[key: string]: {title: string, subject: SubjectType}}>({});
 
   // Timetable Edit State (Form based)
   const [formBatch, setFormBatch] = useState<Batch>(Batch.BATCH_1);
@@ -96,19 +101,28 @@ export const Admin: React.FC = () => {
 
     try {
         const fileExt = uploadFile.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+        // Sanitize filename
+        const safeName = uploadFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const fileName = `${Date.now()}-${safeName}`;
         const filePath = `${uploadSubject}/${fileName}`;
 
         // Supabase Upload
         setUploadStatus('Uploading to Supabase Storage...');
+        
+        // Use upsert true to prevent conflicts and ensure write
         const { data, error: uploadError } = await supabase.storage
             .from('study-materials')
             .upload(filePath, uploadFile, {
                 cacheControl: '3600',
-                upsert: false
+                upsert: true 
             });
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+             if (uploadError.message.includes("The object exceeded the maximum allowed size")) {
+                 throw new Error("File too large. Browser uploads are limited. Use the 'Import from Storage' feature below for large files > 50MB.");
+             }
+             throw uploadError;
+        }
 
         // Get Public URL
         const { data: { publicUrl } } = supabase.storage
@@ -152,20 +166,120 @@ export const Admin: React.FC = () => {
     }
   };
 
+  const fetchUnlinkedFiles = async () => {
+    setIsLoadingImports(true);
+    try {
+        const buckets = ['DCC', 'EDC', 'Chemistry', 'CSE', 'Maths', '']; // Folders to search
+        let allFiles: any[] = [];
+        
+        // 1. Fetch all files from storage buckets
+        for (const folder of buckets) {
+            const { data, error } = await supabase.storage
+                .from('study-materials')
+                .list(folder, { limit: 100, offset: 0 });
+                
+            if (data) {
+                // Add folder prefix if not root
+                const filesWithPaths = data
+                   .filter(f => f.name !== '.emptyFolderPlaceholder')
+                   .map(f => ({
+                    ...f,
+                    fullPath: folder ? `${folder}/${f.name}` : f.name,
+                    folder: folder || 'Uncategorized'
+                }));
+                allFiles = [...allFiles, ...filesWithPaths];
+            }
+        }
+
+        // 2. Filter out files that are already in the DB
+        const existingUrls = new Set(materials.map(m => m.url));
+        
+        // We need to construct the URL to check existence
+        const { data: { publicUrl: baseUrl } } = supabase.storage.from('study-materials').getPublicUrl('');
+        // Base URL usually ends in /study-materials. We need to append path.
+        // Supabase getPublicUrl returns the base url for the file if path is provided.
+        // Let's manually construct comparable URLs or just check filename uniqueness roughly
+        
+        const unlinked = allFiles.filter(file => {
+             const { data: { publicUrl } } = supabase.storage
+                .from('study-materials')
+                .getPublicUrl(file.fullPath);
+             
+             return !existingUrls.has(publicUrl);
+        });
+
+        setPendingImports(unlinked);
+        
+        // Init form state for found files
+        const initialInputs: any = {};
+        unlinked.forEach(f => {
+            initialInputs[f.id] = {
+                title: f.name, // Default title = filename
+                subject: (f.folder && f.folder !== 'Uncategorized') ? f.folder as SubjectType : SubjectType.DCC
+            };
+        });
+        setImportInputs(initialInputs);
+
+    } catch (err) {
+        console.error("Error fetching imports:", err);
+        alert("Failed to fetch storage files.");
+    } finally {
+        setIsLoadingImports(false);
+    }
+  };
+
+  const handleImport = async (file: any) => {
+    const input = importInputs[file.id];
+    if (!input) return;
+
+    try {
+         const { data: { publicUrl } } = supabase.storage
+            .from('study-materials')
+            .getPublicUrl(file.fullPath);
+
+        // Determine Type from extension
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        let type: 'video' | 'photo' | 'note' = 'photo';
+        if (['mp4', 'mov', 'webm', 'mkv'].includes(ext)) type = 'video';
+        else if (['pdf', 'doc', 'docx'].includes(ext)) type = 'note';
+        
+        // Format size
+        const sizeMB = (file.metadata.size / (1024 * 1024)).toFixed(2);
+        const sizeStr = parseFloat(sizeMB) > 1024 
+            ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
+            : `${sizeMB} MB`;
+
+        await addMaterial({
+            id: Date.now().toString(),
+            title: input.title,
+            subject: input.subject,
+            type: type,
+            size: sizeStr,
+            uploadDate: file.created_at || new Date().toISOString(),
+            url: publicUrl
+        });
+
+        // Remove from list
+        setPendingImports(prev => prev.filter(f => f.id !== file.id));
+        alert("Imported successfully!");
+        refreshMaterials();
+
+    } catch (err) {
+        console.error("Import failed:", err);
+        alert("Failed to import file.");
+    }
+  };
+
   const handleSavePeriod = async () => {
     setIsSavingTimetable(true);
     const dayIndex = days.indexOf(formDay);
     
     try {
-        // Update selected batch
         await updateTimetable(formBatch, dayIndex, formPeriodIndex, formSubject, formStartTime, formEndTime);
-
-        // If 'Both Batches Same' is checked, update the other batch too
         if (isBothBatches) {
             const otherBatch = formBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
             await updateTimetable(otherBatch, dayIndex, formPeriodIndex, formSubject, formStartTime, formEndTime);
         }
-        
         alert('Period updated successfully!');
     } catch (e) {
         console.error(e);
@@ -194,7 +308,6 @@ export const Admin: React.FC = () => {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="w-full p-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 outline-none transition-all"
-                placeholder="" 
                 required
               />
             </div>
@@ -205,7 +318,6 @@ export const Admin: React.FC = () => {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 className="w-full p-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 outline-none transition-all"
-                placeholder="" 
                 required
               />
             </div>
@@ -362,11 +474,79 @@ export const Admin: React.FC = () => {
         </div>
       </div>
 
-      {/* Upload Section */}
+      {/* Import / Sync Section (New) */}
+      <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md">
+        <h2 className="text-xl font-bold mb-4 flex items-center">
+            <DownloadCloud className="w-5 h-5 mr-2 text-primary-500" />
+            Import from Storage Bucket
+        </h2>
+        <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl text-sm text-blue-700 dark:text-blue-300 mb-6 border border-blue-100 dark:border-blue-900/30">
+            <p className="font-semibold mb-1">Use this for huge files (20GB+):</p>
+            <ol className="list-decimal ml-4 space-y-1">
+                <li>Go to Supabase Dashboard &gt; Storage &gt; <strong>study-materials</strong> bucket.</li>
+                <li>Upload your file manually into a subject folder (e.g. <code>DCC/my_video.mp4</code>).</li>
+                <li>Click <strong>Scan Bucket</strong> below to find new files and link them to the app.</li>
+            </ol>
+        </div>
+
+        <button 
+            onClick={fetchUnlinkedFiles}
+            disabled={isLoadingImports}
+            className="mb-6 px-6 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-bold flex items-center transition-all"
+        >
+            {isLoadingImports ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <LinkIcon className="w-4 h-4 mr-2" />}
+            Scan Bucket for New Files
+        </button>
+
+        {pendingImports.length > 0 && (
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {pendingImports.map((file) => (
+                    <div key={file.id} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl flex flex-col sm:flex-row gap-4 items-start sm:items-end bg-gray-50 dark:bg-gray-800/50">
+                        <div className="flex-grow space-y-3 w-full">
+                            <div>
+                                <p className="text-xs text-gray-500 font-mono mb-1 truncate">{file.fullPath}</p>
+                                <input 
+                                    type="text"
+                                    value={importInputs[file.id]?.title || ''}
+                                    onChange={(e) => setImportInputs(prev => ({
+                                        ...prev,
+                                        [file.id]: { ...prev[file.id], title: e.target.value }
+                                    }))}
+                                    className="w-full p-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                                    placeholder="Enter Title"
+                                />
+                            </div>
+                            <select
+                                value={importInputs[file.id]?.subject || ''}
+                                onChange={(e) => setImportInputs(prev => ({
+                                    ...prev,
+                                    [file.id]: { ...prev[file.id], subject: e.target.value as SubjectType }
+                                }))}
+                                className="w-full p-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                            >
+                                {SUBJECTS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+                        <button
+                            onClick={() => handleImport(file)}
+                            className="w-full sm:w-auto px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-sm flex items-center justify-center whitespace-nowrap"
+                        >
+                            <Plus className="w-4 h-4 mr-1" /> Add to Library
+                        </button>
+                    </div>
+                ))}
+            </div>
+        )}
+        {pendingImports.length === 0 && !isLoadingImports && (
+            <p className="text-center text-gray-400 italic text-sm">No new files found in storage.</p>
+        )}
+      </div>
+
+      {/* Upload Section (Standard) */}
       <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md">
         <h2 className="text-xl font-bold mb-6 flex items-center pb-4 border-b border-gray-100 dark:border-gray-700">
             <Upload className="w-5 h-5 mr-2 text-primary-500" />
-            Upload Study Material
+            Standard Upload (Small Files)
         </h2>
         <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
@@ -391,7 +571,7 @@ export const Admin: React.FC = () => {
                 </select>
             </div>
             <div>
-                 <label className="block text-sm font-medium mb-2">File Upload (Up to 20GB)</label>
+                 <label className="block text-sm font-medium mb-2">File Upload</label>
                  <div className="relative group">
                     <input 
                         type="file" 
