@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { ADMIN_CREDENTIALS, SUBJECTS } from '../constants';
 import { Batch, SubjectType } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Image as ImageIcon, Video } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
 export const Admin: React.FC = () => {
@@ -22,7 +22,7 @@ export const Admin: React.FC = () => {
   const [uploadStatus, setUploadStatus] = useState('');
 
   // Timetable Edit State (Form based)
-  const [formBatch, setFormBatch] = useState<Batch>(Batch.BATCH_1); // Default Batch 2 in screenshot, keeping 1 as default
+  const [formBatch, setFormBatch] = useState<Batch>(Batch.BATCH_1);
   const [formDay, setFormDay] = useState<string>('Monday');
   const [formPeriodIndex, setFormPeriodIndex] = useState<number>(0); // 0 = Period 1
   const [formSubject, setFormSubject] = useState<string>('');
@@ -104,7 +104,10 @@ export const Admin: React.FC = () => {
             ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
             : `${sizeMB} MB`;
 
-        const type = uploadFile.type.startsWith('video') ? 'video' : 'photo';
+        // Determine Type
+        let type: 'video' | 'photo' | 'note' = 'photo';
+        if (uploadFile.type.startsWith('video')) type = 'video';
+        else if (uploadFile.type === 'application/pdf') type = 'note';
 
         // Save to Database
         setUploadStatus('Saving metadata...');
@@ -207,7 +210,7 @@ export const Admin: React.FC = () => {
         </span>
       </div>
 
-      {/* Timetable Settings (Matches Screenshot) */}
+      {/* Timetable Settings */}
       <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-100 dark:border-gray-700">
             <h2 className="text-xl font-bold flex items-center">
@@ -377,6 +380,7 @@ export const Admin: React.FC = () => {
                         onChange={handleFileChange}
                         className="hidden" 
                         id="file-upload"
+                        accept="image/*,video/*,application/pdf"
                     />
                     <label 
                         htmlFor="file-upload" 
@@ -388,7 +392,7 @@ export const Admin: React.FC = () => {
                                 <span className="font-semibold truncate max-w-[200px]">{uploadFile.name}</span>
                             </div>
                         ) : (
-                            <span className="text-gray-500 group-hover:text-primary-500 transition-colors">Choose Video or Photo</span>
+                            <span className="text-gray-500 group-hover:text-primary-500 transition-colors">Choose Video, Photo or PDF</span>
                         )}
                     </label>
                  </div>

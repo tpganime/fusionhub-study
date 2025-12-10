@@ -61,7 +61,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              id: m.id,
              title: m.title,
              subject: m.subject as SubjectType,
-             type: m.type as 'video' | 'photo',
+             type: m.type as 'video' | 'photo' | 'note', // Cast to supported types
              size: m.size,
              uploadDate: m.upload_date || m.uploadDate, // handle both casing
              url: m.url

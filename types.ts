@@ -34,7 +34,7 @@ export interface StudyMaterial {
   id: string;
   title: string;
   subject: SubjectType;
-  type: 'video' | 'photo';
+  type: 'video' | 'photo' | 'note';
   size: string;
   uploadDate: string;
   url: string; // Mock URL

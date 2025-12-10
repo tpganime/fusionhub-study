@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SubjectType } from '../types';
 import { createSubjectChat } from '../services/geminiService';
-import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User } from 'lucide-react';
+import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText } from 'lucide-react';
 import { Chat } from "@google/genai";
 
 interface ChatMessage {
@@ -77,13 +77,26 @@ export const Subject: React.FC = () => {
     }
   };
 
-  const handleDownload = (url: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    alert(`Starting download for: ${filename}`);
-    document.body.removeChild(link);
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      // Fetch the file as a blob to force download behavior
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Fallback: open in new tab
+      window.open(url, '_blank');
+    }
   };
 
   // Simple formatter for bold text from markdown (**text**)
@@ -95,6 +108,22 @@ export const Subject: React.FC = () => {
       }
       return part;
     });
+  };
+
+  const getMaterialIcon = (type: 'video' | 'photo' | 'note') => {
+      switch(type) {
+          case 'video': return <Video className="w-6 h-6" />;
+          case 'photo': return <ImageIcon className="w-6 h-6" />;
+          case 'note': return <FileText className="w-6 h-6" />;
+      }
+  };
+
+  const getMaterialColor = (type: 'video' | 'photo' | 'note') => {
+      switch(type) {
+          case 'video': return 'bg-red-50 dark:bg-red-900/20 text-red-500';
+          case 'photo': return 'bg-blue-50 dark:bg-blue-900/20 text-blue-500';
+          case 'note': return 'bg-amber-50 dark:bg-amber-900/20 text-amber-500';
+      }
   };
 
   return (
@@ -140,13 +169,15 @@ export const Subject: React.FC = () => {
                     style={{ animationDelay: `${idx * 100}ms` }}
                 >
                     <div className="flex items-center space-x-4 w-full sm:w-auto">
-                        <div className={`p-4 rounded-xl flex-shrink-0 ${item.type === 'video' ? 'bg-red-50 dark:bg-red-900/20 text-red-500' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-500'}`}>
-                            {item.type === 'video' ? <Video className="w-6 h-6" /> : <ImageIcon className="w-6 h-6" />}
+                        <div className={`p-4 rounded-xl flex-shrink-0 ${getMaterialColor(item.type)}`}>
+                            {getMaterialIcon(item.type)}
                         </div>
                         <div className="overflow-hidden">
                             <h3 className="font-bold text-lg dark:text-gray-200 truncate pr-2">{item.title}</h3>
                             <p className="text-xs text-gray-500 font-medium mt-1 flex items-center">
-                                <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded mr-2">{item.size}</span>
+                                <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded mr-2 uppercase">{item.type}</span>
+                                <span>{item.size}</span>
+                                <span className="mx-2">•</span>
                                 {new Date(item.uploadDate).toLocaleDateString()}
                             </p>
                         </div>
