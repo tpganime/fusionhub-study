@@ -109,8 +109,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const logoutAdmin = () => setIsAdmin(false);
 
   const updateTimetable = async (batch: Batch, dayIndex: number, periodIndex: number, subject: string, startTime: string, endTime: string) => {
-    // 1. Optimistic UI update
-    // We need to create a deep copy to avoid mutating state directly
+    // 1. Construct the new schedule based on the current state available in closure.
+    // Note: We access timetable[batch] directly. Even if 'timetable' is slightly stale regarding *other* batches,
+    // it usually holds the correct current state for *this* batch (unless edited concurrently).
     const currentBatchSchedule = timetable[batch];
     if (!currentBatchSchedule) return;
 
@@ -125,17 +126,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     });
     
-    const updatedTimetable = { ...timetable, [batch]: newSchedule };
-    setTimetable(updatedTimetable);
+    // 2. Optimistic UI update using Functional State Update
+    // CRITICAL FIX: We use 'prev' to ensure we are merging into the absolute latest state.
+    // This allows consecutive calls (e.g., for Batch 1 then Batch 2) to work without overwriting each other.
+    setTimetable(prev => ({
+      ...prev,
+      [batch]: newSchedule
+    }));
 
-    // 2. Sync with Supabase
+    // 3. Sync with Supabase
     try {
       await supabase
         .from('timetables')
         .upsert({ batch: batch, schedule: newSchedule });
     } catch (error) {
       console.error("Failed to update timetable in DB", error);
-      // Optionally revert state here on error
+      // Optionally revert state here on error, but complex to implement cleanly
     }
   };
 

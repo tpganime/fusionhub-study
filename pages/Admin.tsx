@@ -148,7 +148,9 @@ export const Admin: React.FC = () => {
             const otherBatch = formBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
             await updateTimetable(otherBatch, dayIndex, formPeriodIndex, formSubject, formStartTime, formEndTime);
         }
-        alert('Period updated successfully!');
+        
+        // Short delay to allow visual feedback
+        setTimeout(() => alert('Period updated successfully!'), 100);
     } catch (e) {
         console.error(e);
         alert('Failed to update period');
