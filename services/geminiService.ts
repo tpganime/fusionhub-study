@@ -1,7 +1,7 @@
 import { GoogleGenAI, Chat } from "@google/genai";
 
-// Use the provided key, falling back to env var if present
-const apiKey = process.env.API_KEY || 'AIzaSyARwSO6VjOYIRIDQy4U2oEqF2tf0m95aC0';
+// Directly use the provided key to ensure browser compatibility
+const apiKey = 'AIzaSyARwSO6VjOYIRIDQy4U2oEqF2tf0m95aC0';
 
 const ai = new GoogleGenAI({ apiKey });
 
