@@ -37,6 +37,23 @@ export const Admin: React.FC = () => {
   // Get all subject options including Timetable-only ones
   const allSubjectOptions = Object.values(SubjectType);
 
+  // Helper to check for batch differences
+  const getBatchBadge = (dayIndex: number, pIdx: number) => {
+    const currentBatch = formBatch;
+    const otherBatch = currentBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
+    
+    // Safety check
+    if (!timetable[otherBatch] || !timetable[currentBatch]) return null;
+    
+    const s1 = timetable[currentBatch][dayIndex]?.periods[pIdx]?.subject;
+    const s2 = timetable[otherBatch][dayIndex]?.periods[pIdx]?.subject;
+    
+    if (s1 && s2 && s1 !== s2) {
+        return currentBatch === Batch.BATCH_1 ? 'B1' : 'B2';
+    }
+    return null;
+  };
+
   // Effect to pre-fill form when selection changes
   useEffect(() => {
     const dayIndex = days.indexOf(formDay);
@@ -433,14 +450,25 @@ export const Admin: React.FC = () => {
                     {timetable[formBatch].map((daySchedule, dIdx) => (
                         <tr key={dIdx} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                             <td className="p-4 border-r dark:border-gray-700 font-bold bg-gray-50 dark:bg-gray-800/30">{daySchedule.day}</td>
-                            {daySchedule.periods.map((period, pIdx) => (
+                            {daySchedule.periods.map((period, pIdx) => {
+                                const badge = getBatchBadge(dIdx, pIdx);
+                                return (
                                 <td key={pIdx} className="p-2 border-r border-b dark:border-gray-700 relative text-center">
-                                    <div className="font-bold text-gray-800 dark:text-gray-200">{period.subject}</div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono">
-                                        {formatTo12Hour(period.startTime)} - {formatTo12Hour(period.endTime)}
+                                    <div className="flex flex-col items-center">
+                                        <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1">
+                                            {period.subject}
+                                            {badge && (
+                                                <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 px-1 rounded">
+                                                    {badge}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono">
+                                            {formatTo12Hour(period.startTime)} - {formatTo12Hour(period.endTime)}
+                                        </div>
                                     </div>
                                 </td>
-                            ))}
+                            );})}
                         </tr>
                     ))}
                 </tbody>

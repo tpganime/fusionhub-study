@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SUBJECTS } from '../constants';
-import { Period, SubjectType } from '../types';
+import { Period, SubjectType, Batch } from '../types';
 import { Clock, Calendar, Cpu, Zap, FlaskConical, Code, Calculator, BookOpen, FileText } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
@@ -10,6 +10,8 @@ export const Home: React.FC = () => {
   const { settings, timetable } = useApp();
   const [currentPeriod, setCurrentPeriod] = useState<Period | null>(null);
   const [nextPeriod, setNextPeriod] = useState<Period | null>(null);
+  const [currentBadge, setCurrentBadge] = useState<string | null>(null);
+  const [nextBadge, setNextBadge] = useState<string | null>(null);
   const [isHoliday, setIsHoliday] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -33,6 +35,22 @@ export const Home: React.FC = () => {
     return false;
   };
 
+  const getBatchBadge = (dayIndex: number, pIdx: number) => {
+    const currentBatch = settings.batch;
+    const otherBatch = currentBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
+    
+    // Safety check
+    if (!timetable[otherBatch] || !timetable[currentBatch]) return null;
+    
+    const s1 = timetable[currentBatch][dayIndex]?.periods[pIdx]?.subject;
+    const s2 = timetable[otherBatch][dayIndex]?.periods[pIdx]?.subject;
+    
+    if (s1 && s2 && s1 !== s2) {
+        return currentBatch === Batch.BATCH_1 ? 'B1' : 'B2';
+    }
+    return null;
+  };
+
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
@@ -54,6 +72,7 @@ export const Home: React.FC = () => {
       if (dayIndex < 0 || dayIndex > 5) {
         // Sunday
         setCurrentPeriod(null);
+        setNextPeriod(null);
         lastNotifiedPeriodRef.current = null;
         return;
       }
@@ -63,14 +82,18 @@ export const Home: React.FC = () => {
       const timeString = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
       const current = todaySchedule.periods.find(p => timeString >= p.startTime && timeString < p.endTime);
-      setCurrentPeriod(current || null);
-
+      
       if (current) {
+        setCurrentPeriod(current);
         const currentIndex = todaySchedule.periods.indexOf(current);
+        setCurrentBadge(getBatchBadge(dayIndex, currentIndex));
+
         if (currentIndex < todaySchedule.periods.length - 1) {
           setNextPeriod(todaySchedule.periods[currentIndex + 1]);
+          setNextBadge(getBatchBadge(dayIndex, currentIndex + 1));
         } else {
           setNextPeriod(null);
+          setNextBadge(null);
         }
 
         // --- Notification Logic ---
@@ -93,12 +116,16 @@ export const Home: React.FC = () => {
         }
 
       } else {
+        setCurrentPeriod(null);
+        setCurrentBadge(null);
         // Check if before first period
         const first = todaySchedule.periods[0];
         if (timeString < first.startTime) {
            setNextPeriod(first);
+           setNextBadge(getBatchBadge(dayIndex, 0));
         } else {
            setNextPeriod(null);
+           setNextBadge(null);
         }
       }
 
@@ -165,7 +192,14 @@ export const Home: React.FC = () => {
                     <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Now Happening</p>
                     {currentPeriod ? (
                         <div>
-                        <h3 className="text-2xl sm:text-3xl font-bold text-green-700 dark:text-green-400 mb-1">{currentPeriod.subject}</h3>
+                        <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-2xl sm:text-3xl font-bold text-green-700 dark:text-green-400">{currentPeriod.subject}</h3>
+                            {currentBadge && (
+                                <span className="text-xs font-bold bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-100 px-2 py-0.5 rounded-md">
+                                    {currentBadge}
+                                </span>
+                            )}
+                        </div>
                         <p className="text-gray-600 dark:text-gray-400 font-medium">
                             {formatTo12Hour(currentPeriod.startTime)} - {formatTo12Hour(currentPeriod.endTime)}
                         </p>
@@ -183,7 +217,14 @@ export const Home: React.FC = () => {
               <p className="text-xs sm:text-sm uppercase tracking-wide opacity-70 mb-1 font-semibold">Up Next</p>
               {nextPeriod ? (
                 <div>
-                  <h3 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-400 mb-1">{nextPeriod.subject}</h3>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-400">{nextPeriod.subject}</h3>
+                    {nextBadge && (
+                        <span className="text-xs font-bold bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-md">
+                            {nextBadge}
+                        </span>
+                    )}
+                  </div>
                   <p className="text-gray-600 dark:text-gray-400 font-medium">
                     {formatTo12Hour(nextPeriod.startTime)} - {formatTo12Hour(nextPeriod.endTime)}
                   </p>
@@ -253,16 +294,26 @@ export const Home: React.FC = () => {
                   <td className="px-3 py-3 sm:px-4 sm:py-4 font-bold sticky left-0 bg-gray-50 dark:bg-dark-card border-r border-gray-200 dark:border-gray-700">
                     {daySchedule.day.substring(0, 3)}
                   </td>
-                  {daySchedule.periods.map((p, pIdx) => (
-                    <td key={pIdx} className="px-3 py-3 sm:px-4 sm:py-4 min-w-[100px] text-center">
-                      <div className="flex flex-col items-center">
-                        <span className="font-bold text-primary-700 dark:text-primary-400 mb-1">{p.subject}</span>
-                        <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
-                          {formatTo12Hour(p.startTime)}-{formatTo12Hour(p.endTime)}
-                        </span>
-                      </div>
-                    </td>
-                  ))}
+                  {daySchedule.periods.map((p, pIdx) => {
+                    const badge = getBatchBadge(idx, pIdx);
+                    return (
+                        <td key={pIdx} className="px-3 py-3 sm:px-4 sm:py-4 min-w-[100px] text-center">
+                        <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1 mb-1">
+                                <span className="font-bold text-primary-700 dark:text-primary-400">{p.subject}</span>
+                                {badge && (
+                                    <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 px-1 rounded">
+                                        {badge}
+                                    </span>
+                                )}
+                            </div>
+                            <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                            {formatTo12Hour(p.startTime)}-{formatTo12Hour(p.endTime)}
+                            </span>
+                        </div>
+                        </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
