@@ -1,4 +1,5 @@
 import { GoogleGenAI, Chat, FunctionDeclaration, Type } from "@google/genai";
+import { StudyMaterial } from "../types";
 
 // Directly use the provided key to ensure browser compatibility
 const apiKey = 'AIzaSyARwSO6VjOYIRIDQy4U2oEqF2tf0m95aC0';
@@ -21,7 +22,16 @@ const imageGenerationTool: FunctionDeclaration = {
   },
 };
 
-export const createSubjectChat = (subject: string): Chat => {
+export const createSubjectChat = (subject: string, materials: StudyMaterial[] = []): Chat => {
+  // Create a context string listing available materials
+  const materialList = materials.map(m => 
+    `- [${m.type.toUpperCase()}] "${m.title}" (Link: ${m.url})`
+  ).join('\n');
+
+  const materialContext = materials.length > 0 
+    ? `\n\n**Available Study Resources:**\nYou have access to the following files in the FusionHub library for this subject. actively recommend these videos or notes when they explain the user's question well:\n${materialList}\n`
+    : '';
+
   return ai.chats.create({
     model: 'gemini-2.5-flash',
     config: {
@@ -35,6 +45,8 @@ export const createSubjectChat = (subject: string): Chat => {
       - **FICT**: Fundamentals of ICT
       - **Maths**: Engineering Mathematics
       
+      ${materialContext}
+
       **Visual Explanations:**
       You have the ability to generate images to help explain concepts. 
       - If a student asks for a diagram, graph, circuit, or visual example, **you MUST use the 'generate_image' tool**.
@@ -46,6 +58,7 @@ export const createSubjectChat = (subject: string): Chat => {
       - Provide clear, concise, and accurate explanations.
       - Use formatting effectively: **bold** for key terms, lists for steps.
       - Keep answers strictly related to ${subject} and Electrical Engineering Polytechnic curriculum.
+      - If you recommend a study material from the provided list, explicitly mention it's available in their library.
       
       Tone: Encouraging, academic but accessible.`,
     },

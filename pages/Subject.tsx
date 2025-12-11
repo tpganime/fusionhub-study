@@ -16,7 +16,7 @@ interface ChatMessage {
 
 export const Subject: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { materials } = useApp();
+  const { materials, isLoadingData } = useApp();
   const [activeTab, setActiveTab] = useState<'content' | 'ai'>('content');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -29,26 +29,38 @@ export const Subject: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Track if chat is initialized to avoid resetting on material updates
+  const chatInitializedRef = useRef<string | null>(null);
 
   const subjectName = id as SubjectType;
   
-  // Filter materials by Subject AND Search Query
-  const filteredMaterials = materials.filter(m => {
-    const matchesSubject = m.subject === subjectName;
-    const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSubject && matchesSearch;
+  // Filter materials by Subject
+  const subjectMaterials = materials.filter(m => m.subject === subjectName);
+  
+  // Filter materials by Subject AND Search Query (for display)
+  const filteredMaterials = subjectMaterials.filter(m => {
+    return m.title.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   // Initialize Chat Session when subject changes
   useEffect(() => {
-    const session = createSubjectChat(subjectName);
+    // Wait for data to load so we can pass materials to AI
+    if (isLoadingData) return;
+    
+    // Prevent resetting chat if we're just re-rendering, unless subject changed
+    if (chatInitializedRef.current === subjectName) return;
+
+    const session = createSubjectChat(subjectName, subjectMaterials);
     setChatSession(session);
     setMessages([{
       id: 'welcome',
       role: 'model',
-      text: `Hello! I'm your AI tutor for ${subjectName}. Ask me anything, or ask for a diagram to visualize a concept!`
+      text: `Hello! I'm your AI tutor for ${subjectName}. I have access to your study notes and videos. Ask me anything, or ask for a diagram!`
     }]);
-  }, [subjectName]);
+    
+    chatInitializedRef.current = subjectName;
+  }, [subjectName, subjectMaterials, isLoadingData]);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -454,7 +466,7 @@ export const Subject: React.FC = () => {
                     </p>
                     <div className="flex items-center text-[10px] sm:text-xs text-purple-600 dark:text-purple-400 font-medium">
                         <ImagePlus className="w-3 h-3 mr-1" />
-                        <span>Supports Image Generation</span>
+                        <span>Supports Image Generation & Library Access</span>
                     </div>
                 </div>
             </form>

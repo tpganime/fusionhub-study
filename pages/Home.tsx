@@ -117,10 +117,15 @@ export const Home: React.FC = () => {
              // Only try to send if permission is explicitly granted
              if ("Notification" in window && Notification.permission === 'granted') {
                 try {
-                  // 1. Visual Notification
-                  new Notification(`Class Started: ${currentPeriod.subject}`, {
-                     body: `${formatTo12Hour(currentPeriod.startTime)} - ${formatTo12Hour(currentPeriod.endTime)}\nBatch: ${settings.batch}`,
-                     icon: '/favicon.ico'
+                  const schedule = timetable[settings.batch][dayIndex];
+                  const periodNum = schedule.periods.indexOf(currentPeriod) + 1;
+                  
+                  // 1. Visual Notification with detailed info and persist flag
+                  const notification = new Notification(`Class Started: ${currentPeriod.subject}`, {
+                     body: `Period ${periodNum} | ${formatTo12Hour(currentPeriod.startTime)} - ${formatTo12Hour(currentPeriod.endTime)}\nBatch: ${settings.batch}`,
+                     icon: '/logo.svg',
+                     tag: 'period-alert',
+                     requireInteraction: true // Helps notification stay visible even if app is backgrounded
                   });
                   
                   // 2. Audio Notification
