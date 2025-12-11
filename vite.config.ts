@@ -5,7 +5,11 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    'process.env': {}
+    // Correctly expose specific environment variables
+    'process.env': {
+      API_KEY: process.env.API_KEY,
+      NODE_ENV: process.env.NODE_ENV
+    }
   },
   build: {
     outDir: 'dist',

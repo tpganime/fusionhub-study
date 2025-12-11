@@ -1,7 +1,10 @@
 import { GoogleGenAI, Chat, FunctionDeclaration, Type } from "@google/genai";
 import { StudyMaterial } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Ensure process.env.API_KEY is treated as a string to prevent build type errors
+const apiKey = process.env.API_KEY as string;
+
+const ai = new GoogleGenAI({ apiKey });
 
 // Define the Tool for Image Generation
 const imageGenerationTool: FunctionDeclaration = {
