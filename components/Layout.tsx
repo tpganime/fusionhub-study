@@ -1,17 +1,66 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { Sun, Moon, Home, Settings, ShieldCheck, LogOut } from 'lucide-react';
+import { formatTo12Hour, getCurrentPeriod } from '../utils/helpers';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { settings, updateSettings, isAdmin, logoutAdmin } = useApp();
+  const { settings, updateSettings, isAdmin, logoutAdmin, timetable } = useApp();
   const location = useLocation();
+  const lastNotifiedPeriodRef = useRef<string | null>(null);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
   };
 
   const isActive = (path: string) => location.pathname === path ? 'text-primary-500 bg-primary-50 dark:bg-primary-900/10 rounded-lg' : 'text-gray-500 dark:text-gray-400 hover:text-primary-600';
+
+  // --- Global Notification Logic ---
+  useEffect(() => {
+    const checkNotifications = () => {
+        if (!settings.notificationsEnabled) return;
+
+        const now = new Date();
+        const { current, periodNum } = getCurrentPeriod(timetable, settings.batch, now);
+
+        if (current) {
+            // Check if it's a new period we haven't notified about yet
+            if (lastNotifiedPeriodRef.current !== current.id) {
+                if ("Notification" in window && Notification.permission === 'granted') {
+                    try {
+                        // 1. Play Sound
+                        // Using a standard notification sound
+                        const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3');
+                        audio.volume = 0.6;
+                        audio.play().catch(e => console.log('Audio play blocked (user must interact first)', e));
+
+                        // 2. Show Notification (Continuous/Sticky)
+                        // 'requireInteraction' keeps it open. 'tag' allows us to replace it if we wanted to update it.
+                        // 'renotify: true' ensures the user gets a buzz/sound when the period changes.
+                        new Notification(`Live Status: ${current.subject}`, {
+                            body: `Period ${periodNum} Started • ${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
+                            icon: '/logo.svg',
+                            tag: 'fusionhub-live-status', 
+                            renotify: true,
+                            requireInteraction: true 
+                        } as any);
+
+                    } catch (e) {
+                        console.error("Notification Error", e);
+                    }
+                }
+                lastNotifiedPeriodRef.current = current.id;
+            }
+        } else {
+            // Reset if break or free period, so next period triggers notification
+            lastNotifiedPeriodRef.current = null;
+        }
+    };
+
+    // Check every second
+    const interval = setInterval(checkNotifications, 1000);
+    return () => clearInterval(interval);
+  }, [settings.notificationsEnabled, settings.batch, timetable]);
 
   return (
     <div className="min-h-screen flex flex-col font-sans transition-colors duration-300">

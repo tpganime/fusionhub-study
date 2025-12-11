@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SUBJECTS } from '../constants';
 import { Period, SubjectType, Batch } from '../types';
 import { Clock, Calendar, Cpu, Zap, FlaskConical, Code, Calculator, BookOpen, FileText, Coffee } from 'lucide-react';
-import { formatTo12Hour } from '../utils/helpers';
+import { formatTo12Hour, checkIsOffDay, getCurrentPeriod } from '../utils/helpers';
 
 export const Home: React.FC = () => {
   const { settings, timetable } = useApp();
@@ -15,26 +15,6 @@ export const Home: React.FC = () => {
 
   const [isHoliday, setIsHoliday] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  // Ref to track the last notified period ID to prevent repeated notifications
-  const lastNotifiedPeriodRef = useRef<string | null>(null);
-
-  // --- Logic for 2nd and 3rd Saturday ---
-  const checkIsOffDay = (date: Date) => {
-    const day = date.getDay();
-    const dateNum = date.getDate();
-    
-    // 0 is Sunday
-    if (day === 0) return true;
-
-    if (day === 6) { // Saturday
-      // Calculate which Saturday it is (1st, 2nd, 3rd, 4th, 5th)
-      const weekNum = Math.ceil(dateNum / 7);
-      // User requested off on 2nd and 3rd Saturday
-      if (weekNum === 2 || weekNum === 3) return true;
-    }
-    return false;
-  };
 
   const getBatchBadge = (dayIndex: number, pIdx: number) => {
     const currentBatch = settings.batch;
@@ -57,91 +37,22 @@ export const Home: React.FC = () => {
       const now = new Date();
       setCurrentTime(now);
 
+      // Use shared helper logic
       if (checkIsOffDay(now)) {
         setIsHoliday(true);
         setStatusB1({ current: null, next: null });
         setStatusB2({ current: null, next: null });
-        lastNotifiedPeriodRef.current = null;
         return;
       } else {
         setIsHoliday(false);
       }
 
-      // Logic to find current period
-      // Need to map Day index (0-6) to Array index (0-5, Mon-Sat)
-      let dayIndex = now.getDay() - 1; 
-      if (dayIndex < 0 || dayIndex > 5) {
-        // Sunday
-        setStatusB1({ current: null, next: null });
-        setStatusB2({ current: null, next: null });
-        lastNotifiedPeriodRef.current = null;
-        return;
-      }
+      // Calculate status for both batches using helper
+      const b1 = getCurrentPeriod(timetable, Batch.BATCH_1, now);
+      const b2 = getCurrentPeriod(timetable, Batch.BATCH_2, now);
 
-      const timeString = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-      // Helper to find periods for a specific batch schedule
-      const findPeriods = (batch: Batch) => {
-          const schedule = timetable[batch][dayIndex];
-          const current = schedule.periods.find(p => timeString >= p.startTime && timeString < p.endTime) || null;
-          
-          let next = null;
-          if (current) {
-              const currentIndex = schedule.periods.indexOf(current);
-              if (currentIndex < schedule.periods.length - 1) {
-                  next = schedule.periods[currentIndex + 1];
-              }
-          } else {
-             // Check if before first period
-            const first = schedule.periods[0];
-            if (first && timeString < first.startTime) {
-                next = first;
-            }
-          }
-          return { current, next };
-      };
-
-      const b1 = findPeriods(Batch.BATCH_1);
-      const b2 = findPeriods(Batch.BATCH_2);
-
-      setStatusB1(b1);
-      setStatusB2(b2);
-
-      // --- Notification Logic (Based on User's Selected Batch) ---
-      const userBatchStatus = settings.batch === Batch.BATCH_1 ? b1 : b2;
-      const currentPeriod = userBatchStatus.current;
-
-      if (settings.notificationsEnabled && currentPeriod) {
-          // If we haven't notified for this specific period ID yet
-          if (lastNotifiedPeriodRef.current !== currentPeriod.id) {
-             // Only try to send if permission is explicitly granted
-             if ("Notification" in window && Notification.permission === 'granted') {
-                try {
-                  const schedule = timetable[settings.batch][dayIndex];
-                  const periodNum = schedule.periods.indexOf(currentPeriod) + 1;
-                  
-                  // 1. Visual Notification with detailed info and persist flag
-                  const notification = new Notification(`Class Started: ${currentPeriod.subject}`, {
-                     body: `Period ${periodNum} | ${formatTo12Hour(currentPeriod.startTime)} - ${formatTo12Hour(currentPeriod.endTime)}\nBatch: ${settings.batch}`,
-                     icon: '/logo.svg',
-                     tag: 'period-alert',
-                     requireInteraction: true // Helps notification stay visible even if app is backgrounded
-                  });
-                  
-                  // 2. Audio Notification
-                  const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3');
-                  audio.volume = 0.5;
-                  audio.play().catch(e => console.warn("Audio play failed (autoplay blocked):", e));
-
-                } catch (e) {
-                  console.warn("Notification failed to send:", e);
-                }
-             }
-             lastNotifiedPeriodRef.current = currentPeriod.id;
-          }
-      } else if (!currentPeriod) {
-          lastNotifiedPeriodRef.current = null;
-      }
+      setStatusB1({ current: b1.current, next: b1.next });
+      setStatusB2({ current: b2.current, next: b2.next });
 
     }, 1000); 
 
@@ -149,7 +60,7 @@ export const Home: React.FC = () => {
     if(checkIsOffDay(now)) setIsHoliday(true);
     
     return () => clearInterval(timer);
-  }, [timetable, settings.batch, settings.notificationsEnabled]);
+  }, [timetable, settings.batch]);
 
   const getSubjectIcon = (id: string) => {
     switch (id) {
