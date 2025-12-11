@@ -2,12 +2,13 @@ import React, { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { Sun, Moon, Home, Settings, ShieldCheck, LogOut } from 'lucide-react';
-import { formatTo12Hour, getCurrentPeriod } from '../utils/helpers';
+import { formatTo12Hour, getCurrentPeriod, getMinutesRemaining } from '../utils/helpers';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { settings, updateSettings, isAdmin, logoutAdmin, timetable } = useApp();
   const location = useLocation();
   const lastNotifiedPeriodRef = useRef<string | null>(null);
+  const lastUpdatedMinuteRef = useRef<number | null>(null);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
@@ -19,40 +20,51 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   useEffect(() => {
     const checkNotifications = () => {
         if (!settings.notificationsEnabled) return;
+        if (!("Notification" in window) || Notification.permission !== 'granted') return;
 
         const now = new Date();
         const { current, periodNum } = getCurrentPeriod(timetable, settings.batch, now);
+        const currentMinute = now.getMinutes();
 
         if (current) {
-            // Check if it's a new period we haven't notified about yet
-            if (lastNotifiedPeriodRef.current !== current.id) {
-                if ("Notification" in window && Notification.permission === 'granted') {
+            // Check if it's a new period or if minute changed (for countdown update)
+            const isNewPeriod = lastNotifiedPeriodRef.current !== current.id;
+            const isNewMinute = lastUpdatedMinuteRef.current !== currentMinute;
+
+            if (isNewPeriod || isNewMinute) {
+                // 1. Play Sound (Only on new period)
+                if (isNewPeriod) {
                     try {
-                        // 1. Play Sound
-                        // Using a standard notification sound
                         const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3');
                         audio.volume = 0.6;
                         audio.play().catch(e => console.log('Audio play blocked (user must interact first)', e));
-
-                        // 2. Show Notification (Continuous/Sticky)
-                        // 'requireInteraction' keeps it open. 'tag' allows us to replace it if we wanted to update it.
-                        // 'renotify: true' ensures the user gets a buzz/sound when the period changes.
-                        new Notification(`Live Status: ${current.subject}`, {
-                            body: `Period ${periodNum} Started • ${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nBatch: ${settings.batch}`,
-                            icon: '/logo.svg',
-                            tag: 'fusionhub-live-status', 
-                            renotify: true,
-                            requireInteraction: true 
-                        } as any);
-
                     } catch (e) {
-                        console.error("Notification Error", e);
+                        console.error("Audio Error", e);
                     }
                 }
+
+                // 2. Show/Update Notification (Continuous/Sticky)
+                try {
+                    const remaining = getMinutesRemaining(current.endTime);
+                    const options: any = {
+                        body: `Period ${periodNum}: ${current.subject}\nTime: ${formatTo12Hour(current.startTime)} - ${formatTo12Hour(current.endTime)}\nRemaining: ${remaining} min\nBatch: ${settings.batch}`,
+                        icon: '/logo.svg',
+                        tag: 'fusionhub-live-status', 
+                        renotify: isNewPeriod, // Buzz/Sound only if it's a new period
+                        silent: !isNewPeriod,  // Silent update for minute ticks
+                        requireInteraction: true 
+                    };
+
+                    new Notification(isNewPeriod ? `🔔 Class Started: ${current.subject}` : `Live: ${current.subject}`, options);
+                } catch (e) {
+                    console.error("Notification Error", e);
+                }
+
                 lastNotifiedPeriodRef.current = current.id;
+                lastUpdatedMinuteRef.current = currentMinute;
             }
         } else {
-            // Reset if break or free period, so next period triggers notification
+            // Reset if break or free period
             lastNotifiedPeriodRef.current = null;
         }
     };

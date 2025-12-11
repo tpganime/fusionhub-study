@@ -16,6 +16,19 @@ export const formatTo12Hour = (time24: string): string => {
   return `${h}:${minutesStr} ${suffix}`;
 };
 
+export const getMinutesRemaining = (endTime: string): number => {
+  if (!endTime) return 0;
+  const now = new Date();
+  const [endH, endM] = endTime.split(':').map(Number);
+  const end = new Date();
+  end.setHours(endH, endM, 0, 0);
+  
+  // If end time is earlier than now (e.g. crossing midnight or passed), handle accordingly
+  // For this app, periods are same-day.
+  const diffMs = end.getTime() - now.getTime();
+  return Math.max(0, Math.ceil(diffMs / 60000));
+};
+
 export const checkIsOffDay = (date: Date): boolean => {
   const day = date.getDay();
   const dateNum = date.getDate();
