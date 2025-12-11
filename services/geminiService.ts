@@ -3,19 +3,21 @@ import { StudyMaterial } from "../types";
 
 // Initialize OpenAI Client (configured for OpenRouter)
 const getAiClient = (): OpenAI => {
-  const apiKey = process.env.API_KEY as string;
+  // Access the injected env variable and ensure it's a string
+  const rawKey = process.env.API_KEY; 
+  const apiKey = typeof rawKey === 'string' ? rawKey.trim() : "";
   
   if (!apiKey || apiKey.includes('placeholder')) {
-    console.error("FusionAI API Key is missing or invalid!");
+    console.warn("FusionAI API Key might be missing or invalid.");
   }
 
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: apiKey,
-    dangerouslyAllowBrowser: true, // Allowed for this client-side app
+    dangerouslyAllowBrowser: true, // Required for client-side usage
     defaultHeaders: {
-      "HTTP-Referer": window.location.origin, // Required for OpenRouter rankings/free tier
-      "X-Title": "FusionHub Study", // Required for OpenRouter rankings/free tier
+      "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "http://localhost:3000", // Required for OpenRouter
+      "X-Title": "FusionHub Study", // Required for OpenRouter
     }
   });
 };
@@ -46,7 +48,7 @@ export class FusionAISession {
 
   constructor(systemInstruction: string) {
     this.client = getAiClient();
-    // Using a capable model available on OpenRouter that supports tools well
+    // Use gpt-4o-mini via OpenRouter
     this.model = 'openai/gpt-4o-mini'; 
     this.history = [
       { role: 'system', content: systemInstruction }
@@ -116,8 +118,8 @@ export class FusionAISession {
         return result;
 
     } catch (error) {
-        console.error("FusionAI Request Failed", error);
-        throw error; // Re-throw to be caught by UI
+        console.error("FusionAI Request Failed:", error);
+        throw error; 
     }
   }
 }
