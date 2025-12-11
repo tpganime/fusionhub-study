@@ -5,7 +5,7 @@ import { Batch, SubjectType } from '../types';
 import { storage, auth } from '../services/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { ref, uploadBytesResumable, getDownloadURL, listAll } from 'firebase/storage';
-import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Link as LinkIcon, DownloadCloud, Plus } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Link as LinkIcon, DownloadCloud, Plus, Image as ImageIcon, Video, Film } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
 export const Admin: React.FC = () => {
@@ -21,6 +21,7 @@ export const Admin: React.FC = () => {
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadSubject, setUploadSubject] = useState<SubjectType>(SubjectType.DCC);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -40,8 +41,18 @@ export const Admin: React.FC = () => {
   const [isBothBatches, setIsBothBatches] = useState<boolean>(false);
   const [isSavingTimetable, setIsSavingTimetable] = useState(false);
 
+  // Get recent uploads from global state
+  const recentUploads = [...materials].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).slice(0, 5);
+
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const allSubjectOptions = Object.values(SubjectType);
+
+  useEffect(() => {
+    // Cleanup preview URL to avoid memory leaks
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+  }, [filePreviewUrl]);
 
   const getBatchBadge = (dayIndex: number, pIdx: number) => {
     const currentBatch = formBatch;
@@ -75,27 +86,23 @@ export const Admin: React.FC = () => {
     setError('');
     setIsLoggingIn(true);
 
-    // 1. Check against hardcoded credentials for safety
     if (email === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
       try {
-        // 2. Try to Sign In to Firebase to get Write Permission
         await signInWithEmailAndPassword(auth, email, password);
         loginAdmin();
       } catch (authErr: any) {
-        // 3. If User doesn't exist in Firebase yet, Create it (One-time setup for Admin)
         if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
             try {
                 await createUserWithEmailAndPassword(auth, email, password);
                 loginAdmin();
             } catch (createErr: any) {
                 console.error("Failed to create admin in Firebase:", createErr);
-                // 4. Fallback: Log in locally only (Write ops might fail if rules strict)
                 loginAdmin();
                 alert("Logged in locally. Note: Firebase DB writes might fail if Auth is disabled.");
             }
         } else {
              console.error("Firebase Login Error:", authErr);
-             loginAdmin(); // Fallback
+             loginAdmin(); 
         }
       }
     } else {
@@ -106,7 +113,11 @@ export const Admin: React.FC = () => {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setUploadFile(e.target.files[0]);
+      const file = e.target.files[0];
+      setUploadFile(file);
+      // Create preview
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+      setFilePreviewUrl(URL.createObjectURL(file));
     }
   };
 
@@ -128,7 +139,6 @@ export const Admin: React.FC = () => {
         const fileName = `${Date.now()}-${safeName}`;
         const filePath = `study-materials/${uploadSubject}/${fileName}`;
 
-        // Firebase Storage Upload
         const storageRef = ref(storage, filePath);
         const uploadTask = uploadBytesResumable(storageRef, uploadFile);
 
@@ -136,8 +146,6 @@ export const Admin: React.FC = () => {
           (snapshot) => {
             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
             setUploadProgress(progress);
-            
-            // Calculate transfer speed roughly
             if (progress === 0) {
                  setUploadStatus('Starting upload connection...');
             } else if (progress < 100) {
@@ -148,20 +156,14 @@ export const Admin: React.FC = () => {
           }, 
           (error: any) => {
             console.error('Upload failed:', error);
-            if (error.code === 'storage/unauthorized') {
-                alert("Permission Denied: Ensure Firebase Storage Rules are set to 'allow read, write: if true;'");
-            } else {
-                alert(`Upload failed: ${error.message}`);
-            }
+            alert(`Upload failed: ${error.message}`);
             setIsUploading(false);
             setUploadStatus('Failed');
           }, 
           async () => {
-             // Upload complete
              setUploadStatus('Saving to database...');
              try {
                  const publicUrl = await getDownloadURL(uploadTask.snapshot.ref);
-
                  const sizeMB = (uploadFile.size / (1024 * 1024)).toFixed(2);
                  const sizeStr = parseFloat(sizeMB) > 1024 
                     ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
@@ -181,8 +183,9 @@ export const Admin: React.FC = () => {
                     url: publicUrl
                  });
 
-                 alert('Upload Successful!');
+                 alert('Upload Successful! File added to table below.');
                  setUploadFile(null);
+                 setFilePreviewUrl(null);
                  setUploadTitle('');
                  setUploadStatus('');
                  setIsUploading(false);
@@ -194,7 +197,6 @@ export const Admin: React.FC = () => {
              }
           }
         );
-
     } catch (err: any) {
         console.error('Upload init failed:', err);
         alert(`Error: ${err.message}`);
@@ -233,10 +235,9 @@ export const Admin: React.FC = () => {
             };
         });
         setImportInputs(initialInputs);
-
     } catch (err) {
         console.error("Error fetching imports:", err);
-        alert("Failed to fetch storage files. Ensure you are logged in.");
+        alert("Failed to fetch storage files.");
     } finally {
         setIsLoadingImports(false);
     }
@@ -245,7 +246,6 @@ export const Admin: React.FC = () => {
   const handleImport = async (fileObj: any, idx: number) => {
     const input = importInputs[idx];
     if (!input) return;
-
     try {
         const url = await getDownloadURL(fileObj.ref);
         const ext = fileObj.name.split('.').pop()?.toLowerCase();
@@ -266,7 +266,6 @@ export const Admin: React.FC = () => {
         setPendingImports(prev => prev.filter((_, i) => i !== idx));
         alert("Imported successfully!");
         refreshMaterials();
-
     } catch (err) {
         console.error("Import failed:", err);
         alert("Failed to import file.");
@@ -276,7 +275,6 @@ export const Admin: React.FC = () => {
   const handleSavePeriod = async () => {
     setIsSavingTimetable(true);
     const dayIndex = days.indexOf(formDay);
-    
     try {
         await updateTimetable(formBatch, dayIndex, formPeriodIndex, formSubject, formStartTime, formEndTime);
         if (isBothBatches) {
@@ -589,15 +587,30 @@ export const Admin: React.FC = () => {
                     />
                     <label 
                         htmlFor="file-upload" 
-                        className="flex items-center justify-center w-full p-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-primary-500 transition-all"
+                        className="flex flex-col items-center justify-center w-full p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-primary-500 transition-all text-center"
                     >
-                        {uploadFile ? (
-                            <div className="flex items-center text-primary-600">
-                                <CheckCircle className="w-5 h-5 mr-2" />
-                                <span className="font-semibold truncate max-w-[200px]">{uploadFile.name}</span>
+                        {filePreviewUrl ? (
+                            <div className="flex flex-col items-center w-full">
+                                {uploadFile?.type.startsWith('image') && (
+                                    <img src={filePreviewUrl} alt="Preview" className="h-32 rounded-lg object-contain mb-3 shadow-md" />
+                                )}
+                                {uploadFile?.type.startsWith('video') && (
+                                    <div className="h-32 w-full max-w-xs bg-black rounded-lg flex items-center justify-center mb-3 shadow-md">
+                                        <Film className="w-12 h-12 text-white/50" />
+                                    </div>
+                                )}
+                                <div className="flex items-center text-primary-600">
+                                    <CheckCircle className="w-5 h-5 mr-2" />
+                                    <span className="font-semibold truncate max-w-[200px]">{uploadFile?.name}</span>
+                                </div>
+                                <span className="text-xs text-gray-500 mt-1">Click to change file</span>
                             </div>
                         ) : (
-                            <span className="text-gray-500 group-hover:text-primary-500 transition-colors">Choose Video, Photo or PDF</span>
+                            <>
+                                <Upload className="w-8 h-8 text-gray-400 mb-2 group-hover:text-primary-500 transition-colors" />
+                                <span className="text-gray-500 group-hover:text-primary-500 transition-colors font-medium">Choose Video, Photo or PDF</span>
+                                <span className="text-xs text-gray-400 mt-1">Supports up to 20GB</span>
+                            </>
                         )}
                     </label>
                  </div>
@@ -622,6 +635,60 @@ export const Admin: React.FC = () => {
                 )}
             </div>
         </form>
+      </div>
+
+      {/* NEW: Recent Uploads Table (To visualize DB entries) */}
+      <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold mb-6 flex items-center">
+            <ImageIcon className="w-5 h-5 mr-2 text-primary-500" />
+            Recent Library Uploads
+        </h2>
+        {recentUploads.length === 0 ? (
+            <p className="text-center text-gray-500 italic py-4">No uploads yet. Upload a file above to see it here.</p>
+        ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs uppercase">
+                        <tr>
+                            <th className="p-4 font-semibold">Preview</th>
+                            <th className="p-4 font-semibold">Title</th>
+                            <th className="p-4 font-semibold">Subject</th>
+                            <th className="p-4 font-semibold">Type</th>
+                            <th className="p-4 font-semibold">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {recentUploads.map((item, idx) => (
+                            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 animate-fade-in-up" style={{ animationDelay: `${idx * 100}ms` }}>
+                                <td className="p-4">
+                                    {item.type === 'photo' && (
+                                        <img src={item.url} alt="Preview" className="w-16 h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+                                    )}
+                                    {item.type === 'video' && (
+                                        <div className="w-16 h-16 bg-black rounded-lg flex items-center justify-center">
+                                            <Film className="w-6 h-6 text-white" />
+                                        </div>
+                                    )}
+                                    {item.type === 'note' && (
+                                        <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center text-red-600">
+                                            <FileText className="w-8 h-8" />
+                                        </div>
+                                    )}
+                                </td>
+                                <td className="p-4 font-medium text-gray-900 dark:text-white max-w-[200px] truncate">{item.title}</td>
+                                <td className="p-4">
+                                    <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-xs font-bold text-gray-600 dark:text-gray-300">
+                                        {item.subject}
+                                    </span>
+                                </td>
+                                <td className="p-4 capitalize text-sm text-gray-500">{item.type}</td>
+                                <td className="p-4 text-sm text-gray-500">{new Date(item.uploadDate).toLocaleDateString()}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        )}
       </div>
 
       {/* Timetable Table View (Read-only/Reference) */}
