@@ -117,8 +117,13 @@ export class FusionAISession {
 
         return result;
 
-    } catch (error) {
-        console.error("FusionAI Request Failed:", error);
+    } catch (error: any) {
+        console.error("FusionAI Request Failed Detailed:", error);
+        // Log specific details if available
+        if (error.response) {
+            console.error("Response data:", error.response.data);
+            console.error("Response status:", error.response.status);
+        }
         throw error; 
     }
   }

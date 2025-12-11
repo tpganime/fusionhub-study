@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Home, Settings, ShieldCheck, LogOut } from 'lucide-react';
+import { Sun, Moon, Home, Settings, ShieldCheck, LogOut, AlertTriangle, ExternalLink } from 'lucide-react';
 import { formatTo12Hour, getCurrentPeriod, getMinutesRemaining } from '../utils/helpers';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { settings, updateSettings, isAdmin, logoutAdmin, timetable } = useApp();
+  const { settings, updateSettings, isAdmin, logoutAdmin, timetable, configError } = useApp();
   const location = useLocation();
   const lastNotifiedPeriodRef = useRef<string | null>(null);
   const lastUpdatedMinuteRef = useRef<number | null>(null);
@@ -76,6 +76,30 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="min-h-screen flex flex-col font-sans transition-colors duration-300">
+      {/* Configuration Error Banner */}
+      {configError && (
+        <div className="bg-amber-100 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-700/50 text-amber-900 dark:text-amber-100 px-4 py-3 shadow-inner">
+           <div className="max-w-7xl mx-auto flex items-start gap-3">
+               <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+               <div className="flex-grow text-sm">
+                   <p className="font-bold mb-1">Firebase Setup Required</p>
+                   {configError === 'auth-disabled' ? (
+                       <p>
+                           Anonymous Authentication is disabled. Go to <a href="https://console.firebase.google.com" target="_blank" className="underline font-semibold hover:text-amber-700">Firebase Console</a> &gt; Build &gt; Authentication &gt; Sign-in method &gt; Enable <strong>Anonymous</strong>.
+                       </p>
+                   ) : (
+                       <p>
+                           Database access is denied. Go to <a href="https://console.firebase.google.com" target="_blank" className="underline font-semibold hover:text-amber-700">Firebase Console</a> &gt; Build &gt; Firestore Database &gt; Rules and change to: <code>allow read, write: if true;</code>
+                       </p>
+                   )}
+               </div>
+               <a href="https://console.firebase.google.com" target="_blank" className="text-amber-700 dark:text-amber-300 hover:text-amber-900">
+                   <ExternalLink className="w-4 h-4" />
+               </a>
+           </div>
+        </div>
+      )}
+
       {/* Navbar */}
       <nav className="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-dark-card/80 border-b border-gray-200 dark:border-gray-700 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

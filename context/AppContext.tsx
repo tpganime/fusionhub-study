@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { UserSettings, Batch, Timetable, StudyMaterial, SubjectType } from '../types';
 import { DEFAULT_TIMETABLE } from '../constants';
-import { supabase } from '../services/supabaseClient';
+import { db, auth } from '../services/firebase';
+import { collection, getDocs, doc, setDoc, addDoc, query, orderBy } from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 interface AppContextType {
   settings: UserSettings;
@@ -14,29 +16,28 @@ interface AppContextType {
   materials: StudyMaterial[];
   addMaterial: (material: StudyMaterial) => Promise<void>;
   isLoadingData: boolean;
-  refreshMaterials: () => Promise<void>; // Added
+  refreshMaterials: () => Promise<void>;
+  configError: 'auth-disabled' | 'permission-denied' | null;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // --- State ---
-  // Settings remain local as they are per-device user preferences
   const [settings, setSettings] = useState<UserSettings>(() => {
     const saved = localStorage.getItem('fh_settings');
-    // Default notifications to false if not set. Default theme is now 'light'
     return saved ? { notificationsEnabled: false, ...JSON.parse(saved) } : { batch: Batch.BATCH_1, theme: 'light', notificationsEnabled: false };
   });
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   
-  // Data from Supabase
+  // Data
   const [timetable, setTimetable] = useState<Timetable>(DEFAULT_TIMETABLE);
-  // Use a Ref to hold the latest timetable state. This prevents stale closure issues
   const timetableRef = useRef<Timetable>(DEFAULT_TIMETABLE);
 
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [configError, setConfigError] = useState<'auth-disabled' | 'permission-denied' | null>(null);
 
   // --- Effects ---
   useEffect(() => {
@@ -48,66 +49,113 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [settings]);
 
-  const fetchMaterials = async () => {
-      const { data: matData, error: matError } = await supabase
-        .from('materials')
-        .select('*')
-        .order('upload_date', { ascending: false });
-        
-      if (matData) {
-         const formattedMaterials: StudyMaterial[] = matData.map((m: any) => ({
-           id: m.id,
-           title: m.title,
-           subject: m.subject as SubjectType,
-           type: m.type as 'video' | 'photo' | 'note',
-           size: m.size,
-           uploadDate: m.upload_date || m.uploadDate,
-           url: m.url
-         }));
-         setMaterials(formattedMaterials);
-      }
-  };
-
-  // Initial Data Fetch
+  // Authenticate and Fetch
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoadingData(true);
-        
-        // 1. Fetch Materials
-        await fetchMaterials();
-
-        // 2. Fetch Timetable
-        const { data: timeData, error: timeError } = await supabase
-          .from('timetables')
-          .select('*');
-
-        if (timeData && timeData.length > 0) {
-          const newTimetable = { ...DEFAULT_TIMETABLE };
-          timeData.forEach((row: any) => {
-             if (row.batch === Batch.BATCH_1 || row.batch === Batch.BATCH_2) {
-                newTimetable[row.batch as Batch] = row.schedule;
-             }
-          });
-          setTimetable(newTimetable);
-          timetableRef.current = newTimetable; // Sync Ref
-        } else {
-          // If no timetable exists in DB, insert default one
-          await supabase.from('timetables').upsert([
-             { batch: Batch.BATCH_1, schedule: DEFAULT_TIMETABLE[Batch.BATCH_1] },
-             { batch: Batch.BATCH_2, schedule: DEFAULT_TIMETABLE[Batch.BATCH_2] }
-          ]);
-        }
-
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      } finally {
-        setIsLoadingData(false);
-      }
+    let mounted = true;
+    
+    const initAuth = async () => {
+        // Setup listener
+        const unsub = onAuthStateChanged(auth, async (user) => {
+            if (!mounted) return;
+            
+            if (user) {
+                // User is signed in, safe to fetch
+                setConfigError(null);
+                await fetchData();
+            } else {
+                // Not logged in. Try Anonymous.
+                try {
+                    await signInAnonymously(auth);
+                    // onAuthStateChanged will trigger again with user
+                } catch (error: any) {
+                    console.warn("FusionHub: Anonymous Auth disabled or restricted.", error.code);
+                    if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/admin-restricted-operation') {
+                        setConfigError('auth-disabled');
+                    }
+                    // Attempt fetch anyway (in case of public rules)
+                    await fetchData(); 
+                }
+            }
+        });
+        return unsub;
     };
 
-    fetchData();
+    const unsubscribePromise = initAuth();
+
+    return () => { 
+        mounted = false;
+        unsubscribePromise.then(unsub => unsub && unsub());
+    };
   }, []);
+
+  const fetchData = async () => {
+    try {
+      setIsLoadingData(true);
+      
+      // 1. Fetch Materials
+      await fetchMaterials();
+
+      // 2. Fetch Timetable
+      const timeSnapshot = await getDocs(collection(db, 'timetables'));
+      
+      if (!timeSnapshot.empty) {
+        const newTimetable = { ...DEFAULT_TIMETABLE };
+        timeSnapshot.forEach((doc) => {
+           const data = doc.data();
+           const batchId = doc.id as Batch;
+           if (batchId === Batch.BATCH_1 || batchId === Batch.BATCH_2) {
+              newTimetable[batchId] = data.schedule;
+           }
+        });
+        setTimetable(newTimetable);
+        timetableRef.current = newTimetable;
+      } else {
+        // Try to initialize if empty
+        try {
+            await setDoc(doc(db, 'timetables', Batch.BATCH_1), { schedule: DEFAULT_TIMETABLE[Batch.BATCH_1] });
+            await setDoc(doc(db, 'timetables', Batch.BATCH_2), { schedule: DEFAULT_TIMETABLE[Batch.BATCH_2] });
+        } catch (e) {
+            console.log("Using default timetable (DB init skipped due to permissions).");
+        }
+      }
+
+    } catch (error: any) {
+      console.error("Error fetching data:", error);
+      if (error.code === 'permission-denied') {
+          // Only override if we don't already know it's an auth issue
+          setConfigError(prev => prev === 'auth-disabled' ? 'auth-disabled' : 'permission-denied');
+      }
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
+
+  const fetchMaterials = async () => {
+      try {
+        const q = query(collection(db, 'materials'), orderBy('uploadDate', 'desc'));
+        const querySnapshot = await getDocs(q);
+        
+        const formattedMaterials: StudyMaterial[] = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                title: data.title,
+                subject: data.subject as SubjectType,
+                type: data.type as 'video' | 'photo' | 'note',
+                size: data.size,
+                uploadDate: data.uploadDate,
+                url: data.url
+            };
+        });
+        setMaterials(formattedMaterials);
+      } catch (e: any) {
+        if (e.code === 'permission-denied') {
+             throw e; // Let fetchData handle it
+        }
+        console.warn("Could not fetch materials (network/unknown).");
+        setMaterials([]); 
+      }
+  };
 
   // --- Actions ---
   const updateSettings = (newSettings: Partial<UserSettings>) => {
@@ -115,10 +163,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const loginAdmin = () => setIsAdmin(true);
-  const logoutAdmin = () => setIsAdmin(false);
+  const logoutAdmin = () => {
+      setIsAdmin(false);
+      auth.signOut(); 
+  };
 
   const updateTimetable = async (batch: Batch, dayIndex: number, periodIndex: number, subject: string, startTime: string, endTime: string) => {
-    // 1. Use Ref to get absolute latest state (bypassing closure staleness)
     const currentTimetable = timetableRef.current;
     const currentBatchSchedule = currentTimetable[batch];
     
@@ -135,23 +185,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
     });
     
-    // 2. Update Ref immediately so subsequent calls see this change
     const updatedTimetable = {
       ...currentTimetable,
       [batch]: newSchedule
     };
     timetableRef.current = updatedTimetable;
-
-    // 3. Update React State to trigger re-render
     setTimetable(updatedTimetable);
 
-    // 4. Sync with Supabase
+    // Sync with Firebase
     try {
-      await supabase
-        .from('timetables')
-        .upsert({ batch: batch, schedule: newSchedule });
+      await setDoc(doc(db, 'timetables', batch), { schedule: newSchedule }, { merge: true });
     } catch (error) {
       console.error("Failed to update timetable in DB", error);
+      alert("Failed to save to database. You might not have permission (Try logging out and logging in again).");
     }
   };
 
@@ -159,18 +205,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 1. Optimistic UI Update
     setMaterials(prev => [material, ...prev]);
 
-    // 2. Sync with Supabase
+    // 2. Sync with Firebase
     try {
-      await supabase.from('materials').insert({
+      await addDoc(collection(db, 'materials'), {
         title: material.title,
         subject: material.subject,
         type: material.type,
         size: material.size,
-        upload_date: material.uploadDate,
+        uploadDate: material.uploadDate,
         url: material.url
       });
     } catch (error) {
       console.error("Failed to add material to DB", error);
+      alert("Saved locally, but failed to sync to Database. Check permissions.");
     }
   };
 
@@ -190,7 +237,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       materials,
       addMaterial,
       isLoadingData,
-      refreshMaterials
+      refreshMaterials,
+      configError
     }}>
       {children}
     </AppContext.Provider>

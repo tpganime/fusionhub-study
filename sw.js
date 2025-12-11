@@ -53,8 +53,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Ignore API/Supabase calls (Network Only)
-  if (url.hostname.includes('supabase.co') || url.hostname.includes('googleapis.com')) {
+  // 2. Ignore API/Firebase calls (Network Only)
+  if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('firebasestorage.googleapis.com') || url.hostname.includes('googleapis.com')) {
     return;
   }
 

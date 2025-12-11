@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { ADMIN_CREDENTIALS, SUBJECTS } from '../constants';
 import { Batch, SubjectType } from '../types';
-import { supabase } from '../services/supabaseClient';
-import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Image as ImageIcon, Video, Link as LinkIcon, DownloadCloud, Plus } from 'lucide-react';
+import { storage, auth } from '../services/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { ref, uploadBytesResumable, getDownloadURL, listAll } from 'firebase/storage';
+import { Upload, FileText, CheckCircle, Lock, Loader2, Calendar, Clock, Save, Link as LinkIcon, DownloadCloud, Plus } from 'lucide-react';
 import { formatTo12Hour } from '../utils/helpers';
 
 export const Admin: React.FC = () => {
@@ -13,12 +15,14 @@ export const Admin: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Upload State
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadSubject, setUploadSubject] = useState<SubjectType>(SubjectType.DCC);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
   // Import/Sync State
@@ -29,41 +33,31 @@ export const Admin: React.FC = () => {
   // Timetable Edit State (Form based)
   const [formBatch, setFormBatch] = useState<Batch>(Batch.BATCH_1);
   const [formDay, setFormDay] = useState<string>('Monday');
-  const [formPeriodIndex, setFormPeriodIndex] = useState<number>(0); // 0 = Period 1
+  const [formPeriodIndex, setFormPeriodIndex] = useState<number>(0); 
   const [formSubject, setFormSubject] = useState<string>('');
   const [formStartTime, setFormStartTime] = useState<string>('09:00');
   const [formEndTime, setFormEndTime] = useState<string>('10:00');
   const [isBothBatches, setIsBothBatches] = useState<boolean>(false);
   const [isSavingTimetable, setIsSavingTimetable] = useState(false);
 
-  // Helper to get days
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  
-  // Get all subject options including Timetable-only ones
   const allSubjectOptions = Object.values(SubjectType);
 
-  // Helper to check for batch differences
   const getBatchBadge = (dayIndex: number, pIdx: number) => {
     const currentBatch = formBatch;
     const otherBatch = currentBatch === Batch.BATCH_1 ? Batch.BATCH_2 : Batch.BATCH_1;
-    
-    // Safety check
     if (!timetable[otherBatch] || !timetable[currentBatch]) return null;
-    
     const s1 = timetable[currentBatch][dayIndex]?.periods[pIdx]?.subject;
     const s2 = timetable[otherBatch][dayIndex]?.periods[pIdx]?.subject;
-    
     if (s1 && s2 && s1 !== s2) {
         return currentBatch === Batch.BATCH_1 ? 'B1' : 'B2';
     }
     return null;
   };
 
-  // Effect to pre-fill form when selection changes
   useEffect(() => {
     const dayIndex = days.indexOf(formDay);
     if (dayIndex === -1) return;
-
     const schedule = timetable[formBatch];
     if (schedule && schedule[dayIndex]) {
         const period = schedule[dayIndex].periods[formPeriodIndex];
@@ -76,14 +70,38 @@ export const Admin: React.FC = () => {
   }, [formBatch, formDay, formPeriodIndex, timetable]);
 
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setIsLoggingIn(true);
+
+    // 1. Check against hardcoded credentials for safety
     if (email === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
-      loginAdmin();
-      setError('');
+      try {
+        // 2. Try to Sign In to Firebase to get Write Permission
+        await signInWithEmailAndPassword(auth, email, password);
+        loginAdmin();
+      } catch (authErr: any) {
+        // 3. If User doesn't exist in Firebase yet, Create it (One-time setup for Admin)
+        if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                loginAdmin();
+            } catch (createErr: any) {
+                console.error("Failed to create admin in Firebase:", createErr);
+                // 4. Fallback: Log in locally only (Write ops might fail if rules strict)
+                loginAdmin();
+                alert("Logged in locally. Note: Firebase DB writes might fail if Auth is disabled.");
+            }
+        } else {
+             console.error("Firebase Login Error:", authErr);
+             loginAdmin(); // Fallback
+        }
+      }
     } else {
       setError('Invalid credentials');
     }
+    setIsLoggingIn(false);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,71 +115,66 @@ export const Admin: React.FC = () => {
     if (!uploadFile || !uploadTitle) return;
 
     setIsUploading(true);
-    setUploadStatus('Preparing upload...');
+    setUploadStatus('Initializing...');
+    setUploadProgress(0);
 
     try {
-        const fileExt = uploadFile.name.split('.').pop();
-        // Sanitize filename
         const safeName = uploadFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
         const fileName = `${Date.now()}-${safeName}`;
-        const filePath = `${uploadSubject}/${fileName}`;
+        const filePath = `study-materials/${uploadSubject}/${fileName}`;
 
-        // Supabase Upload
-        setUploadStatus('Uploading to Supabase Storage...');
-        
-        // Use upsert true to prevent conflicts and ensure write
-        const { data, error: uploadError } = await supabase.storage
-            .from('study-materials')
-            .upload(filePath, uploadFile, {
-                cacheControl: '3600',
-                upsert: true 
-            });
+        // Firebase Storage Upload
+        const storageRef = ref(storage, filePath);
+        const uploadTask = uploadBytesResumable(storageRef, uploadFile);
 
-        if (uploadError) {
-             if (uploadError.message.includes("The object exceeded the maximum allowed size")) {
-                 throw new Error("File too large. Browser uploads are limited. Use the 'Import from Storage' feature below for large files > 50MB.");
-             }
-             throw uploadError;
-        }
+        uploadTask.on('state_changed', 
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            setUploadProgress(progress);
+            setUploadStatus(`Uploading: ${progress.toFixed(1)}%`);
+          }, 
+          (error) => {
+            console.error('Upload failed:', error);
+            alert(`Upload failed: ${error.message}`);
+            setIsUploading(false);
+            setUploadStatus('Failed');
+          }, 
+          async () => {
+             // Upload complete
+             setUploadStatus('Processing...');
+             const publicUrl = await getDownloadURL(uploadTask.snapshot.ref);
 
-        // Get Public URL
-        const { data: { publicUrl } } = supabase.storage
-            .from('study-materials')
-            .getPublicUrl(filePath);
+             const sizeMB = (uploadFile.size / (1024 * 1024)).toFixed(2);
+             const sizeStr = parseFloat(sizeMB) > 1024 
+                ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
+                : `${sizeMB} MB`;
 
-        // Format size
-        const sizeMB = (uploadFile.size / (1024 * 1024)).toFixed(2);
-        const sizeStr = parseFloat(sizeMB) > 1024 
-            ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
-            : `${sizeMB} MB`;
+             let type: 'video' | 'photo' | 'note' = 'photo';
+             if (uploadFile.type.startsWith('video')) type = 'video';
+             else if (uploadFile.type === 'application/pdf') type = 'note';
 
-        // Determine Type
-        let type: 'video' | 'photo' | 'note' = 'photo';
-        if (uploadFile.type.startsWith('video')) type = 'video';
-        else if (uploadFile.type === 'application/pdf') type = 'note';
+             await addMaterial({
+                id: Date.now().toString(),
+                title: uploadTitle,
+                subject: uploadSubject,
+                type: type,
+                size: sizeStr,
+                uploadDate: new Date().toISOString(),
+                url: publicUrl
+             });
 
-        // Save to Database
-        setUploadStatus('Saving metadata...');
-        await addMaterial({
-            id: Date.now().toString(),
-            title: uploadTitle,
-            subject: uploadSubject,
-            type: type,
-            size: sizeStr,
-            uploadDate: new Date().toISOString(),
-            url: publicUrl
-        });
-
-        alert('Upload Successful!');
-        setUploadFile(null);
-        setUploadTitle('');
-        setUploadStatus('');
+             alert('Upload Successful!');
+             setUploadFile(null);
+             setUploadTitle('');
+             setUploadStatus('');
+             setIsUploading(false);
+             setUploadProgress(0);
+          }
+        );
 
     } catch (err: any) {
-        console.error('Upload failed:', err);
-        alert(`Upload failed: ${err.message}`);
-        setUploadStatus('Failed');
-    } finally {
+        console.error('Upload init failed:', err);
+        alert(`Error: ${err.message}`);
         setIsUploading(false);
     }
   };
@@ -169,98 +182,65 @@ export const Admin: React.FC = () => {
   const fetchUnlinkedFiles = async () => {
     setIsLoadingImports(true);
     try {
-        const buckets = ['DCC', 'EDC', 'Chemistry', 'CSE', 'Maths', '']; // Folders to search
+        const buckets = ['DCC', 'EDC', 'Chemistry', 'CSE', 'Maths']; 
         let allFiles: any[] = [];
         
-        // 1. Fetch all files from storage buckets
         for (const folder of buckets) {
-            const { data, error } = await supabase.storage
-                .from('study-materials')
-                .list(folder, { limit: 100, offset: 0 });
-                
-            if (data) {
-                // Add folder prefix if not root
-                const filesWithPaths = data
-                   .filter(f => f.name !== '.emptyFolderPlaceholder')
-                   .map(f => ({
-                    ...f,
-                    fullPath: folder ? `${folder}/${f.name}` : f.name,
-                    folder: folder || 'Uncategorized'
-                }));
-                allFiles = [...allFiles, ...filesWithPaths];
+            const folderRef = ref(storage, `study-materials/${folder}`);
+            try {
+                const res = await listAll(folderRef);
+                for (const itemRef of res.items) {
+                    allFiles.push({
+                        name: itemRef.name,
+                        fullPath: itemRef.fullPath,
+                        folder: folder,
+                        ref: itemRef
+                    });
+                }
+            } catch (err) {
+               console.log(`Skipping folder ${folder}, likely empty.`);
             }
         }
-
-        // 2. Filter out files that are already in the DB
-        const existingUrls = new Set(materials.map(m => m.url));
-        
-        // We need to construct the URL to check existence
-        const { data: { publicUrl: baseUrl } } = supabase.storage.from('study-materials').getPublicUrl('');
-        // Base URL usually ends in /study-materials. We need to append path.
-        // Supabase getPublicUrl returns the base url for the file if path is provided.
-        // Let's manually construct comparable URLs or just check filename uniqueness roughly
-        
-        const unlinked = allFiles.filter(file => {
-             const { data: { publicUrl } } = supabase.storage
-                .from('study-materials')
-                .getPublicUrl(file.fullPath);
-             
-             return !existingUrls.has(publicUrl);
-        });
-
-        setPendingImports(unlinked);
-        
-        // Init form state for found files
+        setPendingImports(allFiles);
         const initialInputs: any = {};
-        unlinked.forEach(f => {
-            initialInputs[f.id] = {
-                title: f.name, // Default title = filename
-                subject: (f.folder && f.folder !== 'Uncategorized') ? f.folder as SubjectType : SubjectType.DCC
+        allFiles.forEach((f, idx) => {
+            initialInputs[idx] = {
+                title: f.name,
+                subject: f.folder as SubjectType
             };
         });
         setImportInputs(initialInputs);
 
     } catch (err) {
         console.error("Error fetching imports:", err);
-        alert("Failed to fetch storage files.");
+        alert("Failed to fetch storage files. Ensure you are logged in.");
     } finally {
         setIsLoadingImports(false);
     }
   };
 
-  const handleImport = async (file: any) => {
-    const input = importInputs[file.id];
+  const handleImport = async (fileObj: any, idx: number) => {
+    const input = importInputs[idx];
     if (!input) return;
 
     try {
-         const { data: { publicUrl } } = supabase.storage
-            .from('study-materials')
-            .getPublicUrl(file.fullPath);
-
-        // Determine Type from extension
-        const ext = file.name.split('.').pop()?.toLowerCase();
+        const url = await getDownloadURL(fileObj.ref);
+        const ext = fileObj.name.split('.').pop()?.toLowerCase();
         let type: 'video' | 'photo' | 'note' = 'photo';
         if (['mp4', 'mov', 'webm', 'mkv'].includes(ext)) type = 'video';
         else if (['pdf', 'doc', 'docx'].includes(ext)) type = 'note';
         
-        // Format size
-        const sizeMB = (file.metadata.size / (1024 * 1024)).toFixed(2);
-        const sizeStr = parseFloat(sizeMB) > 1024 
-            ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
-            : `${sizeMB} MB`;
-
         await addMaterial({
             id: Date.now().toString(),
             title: input.title,
             subject: input.subject,
             type: type,
-            size: sizeStr,
-            uploadDate: file.created_at || new Date().toISOString(),
-            url: publicUrl
+            size: "Unknown Size",
+            uploadDate: new Date().toISOString(),
+            url: url
         });
 
-        // Remove from list
-        setPendingImports(prev => prev.filter(f => f.id !== file.id));
+        setPendingImports(prev => prev.filter((_, i) => i !== idx));
         alert("Imported successfully!");
         refreshMaterials();
 
@@ -322,8 +302,12 @@ export const Admin: React.FC = () => {
               />
             </div>
             {error && <p className="text-red-500 text-sm text-center bg-red-50 dark:bg-red-900/20 py-2 rounded animate-shake">{error}</p>}
-            <button type="submit" className="w-full bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-lg font-bold transition-all shadow-lg shadow-primary-500/30 transform active:scale-95">
-              Login
+            <button 
+                type="submit" 
+                disabled={isLoggingIn}
+                className="w-full bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-lg font-bold transition-all shadow-lg shadow-primary-500/30 transform active:scale-95 flex justify-center items-center"
+            >
+              {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Login'}
             </button>
           </form>
         </div>
@@ -478,14 +462,14 @@ export const Admin: React.FC = () => {
       <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md">
         <h2 className="text-xl font-bold mb-4 flex items-center">
             <DownloadCloud className="w-5 h-5 mr-2 text-primary-500" />
-            Import from Storage Bucket
+            Import from Firebase Storage
         </h2>
         <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl text-sm text-blue-700 dark:text-blue-300 mb-6 border border-blue-100 dark:border-blue-900/30">
-            <p className="font-semibold mb-1">Use this for huge files (20GB+):</p>
+            <p className="font-semibold mb-1">Use this for huge files (up to 20GB):</p>
             <ol className="list-decimal ml-4 space-y-1">
-                <li>Go to Supabase Dashboard &gt; Storage &gt; <strong>study-materials</strong> bucket.</li>
-                <li>Upload your file manually into a subject folder (e.g. <code>DCC/my_video.mp4</code>).</li>
-                <li>Click <strong>Scan Bucket</strong> below to find new files and link them to the app.</li>
+                <li>Go to Firebase Console &gt; Storage.</li>
+                <li>Upload file to <code>study-materials/&lt;Subject&gt;</code> folder.</li>
+                <li>Click <strong>Scan Bucket</strong> below to link them.</li>
             </ol>
         </div>
 
@@ -495,32 +479,32 @@ export const Admin: React.FC = () => {
             className="mb-6 px-6 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-bold flex items-center transition-all"
         >
             {isLoadingImports ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <LinkIcon className="w-4 h-4 mr-2" />}
-            Scan Bucket for New Files
+            Scan Storage for New Files
         </button>
 
         {pendingImports.length > 0 && (
             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {pendingImports.map((file) => (
-                    <div key={file.id} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl flex flex-col sm:flex-row gap-4 items-start sm:items-end bg-gray-50 dark:bg-gray-800/50">
+                {pendingImports.map((file, idx) => (
+                    <div key={idx} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl flex flex-col sm:flex-row gap-4 items-start sm:items-end bg-gray-50 dark:bg-gray-800/50">
                         <div className="flex-grow space-y-3 w-full">
                             <div>
                                 <p className="text-xs text-gray-500 font-mono mb-1 truncate">{file.fullPath}</p>
                                 <input 
                                     type="text"
-                                    value={importInputs[file.id]?.title || ''}
+                                    value={importInputs[idx]?.title || ''}
                                     onChange={(e) => setImportInputs(prev => ({
                                         ...prev,
-                                        [file.id]: { ...prev[file.id], title: e.target.value }
+                                        [idx]: { ...prev[idx], title: e.target.value }
                                     }))}
                                     className="w-full p-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
                                     placeholder="Enter Title"
                                 />
                             </div>
                             <select
-                                value={importInputs[file.id]?.subject || ''}
+                                value={importInputs[idx]?.subject || ''}
                                 onChange={(e) => setImportInputs(prev => ({
                                     ...prev,
-                                    [file.id]: { ...prev[file.id], subject: e.target.value as SubjectType }
+                                    [idx]: { ...prev[idx], subject: e.target.value as SubjectType }
                                 }))}
                                 className="w-full p-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
                             >
@@ -528,7 +512,7 @@ export const Admin: React.FC = () => {
                             </select>
                         </div>
                         <button
-                            onClick={() => handleImport(file)}
+                            onClick={() => handleImport(file, idx)}
                             className="w-full sm:w-auto px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-sm flex items-center justify-center whitespace-nowrap"
                         >
                             <Plus className="w-4 h-4 mr-1" /> Add to Library
@@ -546,7 +530,7 @@ export const Admin: React.FC = () => {
       <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md">
         <h2 className="text-xl font-bold mb-6 flex items-center pb-4 border-b border-gray-100 dark:border-gray-700">
             <Upload className="w-5 h-5 mr-2 text-primary-500" />
-            Standard Upload (Small Files)
+            Standard Upload (Supports Large Files)
         </h2>
         <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
@@ -598,9 +582,15 @@ export const Admin: React.FC = () => {
             <div className="md:col-span-2 mt-2">
                 {isUploading ? (
                     <div className="w-full p-4 bg-primary-50 dark:bg-primary-900/10 rounded-xl flex flex-col items-center justify-center text-primary-600 border border-primary-100 dark:border-primary-900/20">
-                        <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                        <span className="font-bold text-lg">{uploadStatus}</span>
-                        <span className="text-xs text-primary-400 mt-1">Please keep this tab open until completion.</span>
+                        <div className="flex items-center mb-2">
+                             <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                             <span className="font-bold text-lg">{uploadStatus}</span>
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                            <div className="bg-primary-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                        </div>
+                        <span className="text-xs text-primary-400 mt-2 font-semibold">Please keep this tab open until 100%.</span>
                     </div>
                 ) : (
                     <button type="submit" className="w-full bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white py-4 rounded-xl font-bold shadow-lg shadow-primary-500/20 transition-all transform active:scale-[0.98]">
