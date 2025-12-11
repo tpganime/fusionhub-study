@@ -14,12 +14,12 @@ export const SUBJECTS = [
 ];
 
 const DEFAULT_PERIODS = [
-  { id: '1', startTime: '09:00', endTime: '10:00', subject: 'DCC' },
-  { id: '2', startTime: '10:00', endTime: '11:00', subject: 'EDC' },
-  { id: '3', startTime: '11:00', endTime: '12:00', subject: 'Chemistry' },
-  { id: '4', startTime: '12:30', endTime: '13:30', subject: 'CSE' },
-  { id: '5', startTime: '13:30', endTime: '14:30', subject: 'Maths' },
-  { id: '6', startTime: '14:30', endTime: '15:30', subject: 'Library' },
+  { id: '1', startTime: '08:00', endTime: '09:00', subject: 'DCC' },
+  { id: '2', startTime: '09:00', endTime: '10:00', subject: 'EDC' },
+  { id: '3', startTime: '10:00', endTime: '11:00', subject: 'Chemistry' },
+  { id: '4', startTime: '11:00', endTime: '12:00', subject: 'CSE' },
+  { id: '5', startTime: '12:00', endTime: '13:00', subject: 'Maths' },
+  { id: '6', startTime: '13:00', endTime: '14:00', subject: 'Library' },
 ];
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

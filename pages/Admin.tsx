@@ -35,8 +35,8 @@ export const Admin: React.FC = () => {
   const [formDay, setFormDay] = useState<string>('Monday');
   const [formPeriodIndex, setFormPeriodIndex] = useState<number>(0); 
   const [formSubject, setFormSubject] = useState<string>('');
-  const [formStartTime, setFormStartTime] = useState<string>('09:00');
-  const [formEndTime, setFormEndTime] = useState<string>('10:00');
+  const [formStartTime, setFormStartTime] = useState<string>('08:00');
+  const [formEndTime, setFormEndTime] = useState<string>('09:00');
   const [isBothBatches, setIsBothBatches] = useState<boolean>(false);
   const [isSavingTimetable, setIsSavingTimetable] = useState(false);
 
@@ -114,8 +114,13 @@ export const Admin: React.FC = () => {
     e.preventDefault();
     if (!uploadFile || !uploadTitle) return;
 
+    if (!auth.currentUser) {
+        alert("You appear to be logged out of Firebase. Please refresh and log in again.");
+        return;
+    }
+
     setIsUploading(true);
-    setUploadStatus('Initializing...');
+    setUploadStatus('Processing file (this may take time for large videos)...');
     setUploadProgress(0);
 
     try {
@@ -131,44 +136,62 @@ export const Admin: React.FC = () => {
           (snapshot) => {
             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
             setUploadProgress(progress);
-            setUploadStatus(`Uploading: ${progress.toFixed(1)}%`);
+            
+            // Calculate transfer speed roughly
+            if (progress === 0) {
+                 setUploadStatus('Starting upload connection...');
+            } else if (progress < 100) {
+                 setUploadStatus(`Uploading: ${progress.toFixed(1)}%`);
+            } else {
+                 setUploadStatus('Finalizing...');
+            }
           }, 
-          (error) => {
+          (error: any) => {
             console.error('Upload failed:', error);
-            alert(`Upload failed: ${error.message}`);
+            if (error.code === 'storage/unauthorized') {
+                alert("Permission Denied: Ensure Firebase Storage Rules are set to 'allow read, write: if true;'");
+            } else {
+                alert(`Upload failed: ${error.message}`);
+            }
             setIsUploading(false);
             setUploadStatus('Failed');
           }, 
           async () => {
              // Upload complete
-             setUploadStatus('Processing...');
-             const publicUrl = await getDownloadURL(uploadTask.snapshot.ref);
+             setUploadStatus('Saving to database...');
+             try {
+                 const publicUrl = await getDownloadURL(uploadTask.snapshot.ref);
 
-             const sizeMB = (uploadFile.size / (1024 * 1024)).toFixed(2);
-             const sizeStr = parseFloat(sizeMB) > 1024 
-                ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
-                : `${sizeMB} MB`;
+                 const sizeMB = (uploadFile.size / (1024 * 1024)).toFixed(2);
+                 const sizeStr = parseFloat(sizeMB) > 1024 
+                    ? `${(parseFloat(sizeMB)/1024).toFixed(2)} GB` 
+                    : `${sizeMB} MB`;
 
-             let type: 'video' | 'photo' | 'note' = 'photo';
-             if (uploadFile.type.startsWith('video')) type = 'video';
-             else if (uploadFile.type === 'application/pdf') type = 'note';
+                 let type: 'video' | 'photo' | 'note' = 'photo';
+                 if (uploadFile.type.startsWith('video')) type = 'video';
+                 else if (uploadFile.type === 'application/pdf') type = 'note';
 
-             await addMaterial({
-                id: Date.now().toString(),
-                title: uploadTitle,
-                subject: uploadSubject,
-                type: type,
-                size: sizeStr,
-                uploadDate: new Date().toISOString(),
-                url: publicUrl
-             });
+                 await addMaterial({
+                    id: Date.now().toString(),
+                    title: uploadTitle,
+                    subject: uploadSubject,
+                    type: type,
+                    size: sizeStr,
+                    uploadDate: new Date().toISOString(),
+                    url: publicUrl
+                 });
 
-             alert('Upload Successful!');
-             setUploadFile(null);
-             setUploadTitle('');
-             setUploadStatus('');
-             setIsUploading(false);
-             setUploadProgress(0);
+                 alert('Upload Successful!');
+                 setUploadFile(null);
+                 setUploadTitle('');
+                 setUploadStatus('');
+                 setIsUploading(false);
+                 setUploadProgress(0);
+             } catch (dbError: any) {
+                 console.error("DB Save failed", dbError);
+                 alert(`File uploaded, but database sync failed: ${dbError.message}`);
+                 setIsUploading(false);
+             }
           }
         );
 
