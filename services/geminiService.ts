@@ -1,16 +1,22 @@
 import OpenAI from "openai";
 import { StudyMaterial } from "../types";
 
-// Initialize OpenAI Client (configured for OpenRouter based on key format)
+// Initialize OpenAI Client (configured for OpenRouter)
 const getAiClient = (): OpenAI => {
   const apiKey = process.env.API_KEY as string;
-  if (!apiKey) {
-    console.error("FusionAI API Key is missing!");
+  
+  if (!apiKey || apiKey.includes('placeholder')) {
+    console.error("FusionAI API Key is missing or invalid!");
   }
+
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: apiKey,
-    dangerouslyAllowBrowser: true // Allowed for this client-side demo app
+    dangerouslyAllowBrowser: true, // Allowed for this client-side app
+    defaultHeaders: {
+      "HTTP-Referer": window.location.origin, // Required for OpenRouter rankings/free tier
+      "X-Title": "FusionHub Study", // Required for OpenRouter rankings/free tier
+    }
   });
 };
 
@@ -53,8 +59,6 @@ export class FusionAISession {
        const { name, response } = params.parts[0].functionResponse;
        
        // Find the last assistant message with a tool call to link this response
-       // We iterate backwards to find the matching tool call
-       // Note: This assumes simple synchronous turn-taking which fits this app
        let toolCallId = null;
        for (let i = this.history.length - 1; i >= 0; i--) {
            const msg = this.history[i];
@@ -113,7 +117,7 @@ export class FusionAISession {
 
     } catch (error) {
         console.error("FusionAI Request Failed", error);
-        return { text: "I'm having trouble connecting to FusionAI services right now. Please check your connection.", functionCalls: [] };
+        throw error; // Re-throw to be caught by UI
     }
   }
 }
@@ -125,7 +129,7 @@ export const createSubjectChat = (subject: string, materials: StudyMaterial[] = 
   ).join('\n');
 
   const materialContext = materials.length > 0 
-    ? `\n\n**Available Study Resources:**\nYou have access to the following files in the FusionHub library for this subject. actively recommend these videos or notes when they explain the user's question well:\n${materialList}\n`
+    ? `\n\n**Available Study Resources:**\nYou have access to the following files in the FusionHub library for this subject. Actively recommend these videos or notes when they explain the user's question well:\n${materialList}\n`
     : '';
 
   const systemInstruction = `You are FusionAI, an expert, patient, and friendly tutor for the subject: ${subject}.

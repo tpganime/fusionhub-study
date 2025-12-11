@@ -152,7 +152,7 @@ export const Subject: React.FC = () => {
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'model',
-        text: "Sorry, I'm having trouble connecting right now. Please try again."
+        text: "Sorry, I'm having trouble connecting right now. Please check your internet connection and try again."
       }]);
     } finally {
       setIsLoading(false);
