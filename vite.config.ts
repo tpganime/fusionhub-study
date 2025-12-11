@@ -7,7 +7,7 @@ export default defineConfig({
   define: {
     // specific replacement for the API key to ensure it is available in the client bundle
     // uses the provided key as a fallback to ensure immediate deployment stability
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || "178a64ff-cabe-43b9-9855-7cdc17dfe2ca"),
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || "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"),
   },
   build: {
     outDir: 'dist',

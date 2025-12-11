@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { SubjectType, StudyMaterial } from '../types';
-import { createSubjectChat, generateVisualContent } from '../services/geminiService';
+import { createSubjectChat, generateVisualContent, FusionAISession } from '../services/geminiService';
 import { ArrowLeft, Video, Image as ImageIcon, Download, Search, Sparkles, Send, Bot, User, FileText, Loader2, ImagePlus, X, Eye, ExternalLink, PlayCircle } from 'lucide-react';
-import { Chat } from "@google/genai";
 
 interface ChatMessage {
   id: string;
@@ -24,7 +23,7 @@ export const Subject: React.FC = () => {
   const [previewItem, setPreviewItem] = useState<StudyMaterial | null>(null);
   
   // AI Chat State
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [chatSession, setChatSession] = useState<FusionAISession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +55,7 @@ export const Subject: React.FC = () => {
     setMessages([{
       id: 'welcome',
       role: 'model',
-      text: `Hello! I'm your AI tutor for ${subjectName}. I have access to your study notes and videos. Ask me anything, or ask for a diagram!`
+      text: `Hello! I'm FusionAI, your study companion for ${subjectName}. I can see your study notes and videos. Ask me anything, or ask for a diagram!`
     }]);
     
     chatInitializedRef.current = subjectName;
@@ -101,14 +100,14 @@ export const Subject: React.FC = () => {
       if (functionCalls && functionCalls.length > 0) {
         for (const call of functionCalls) {
           if (call.name === 'generate_image') {
-             const prompt = (call.args as any).prompt;
+             const prompt = call.args.prompt;
              
              // Add a temporary "Generating image..." indicator
              const imgLoadingId = (Date.now() + 2).toString();
              setMessages(prev => [...prev, {
                 id: imgLoadingId,
                 role: 'model',
-                text: `🎨 Generating a diagram for: "${prompt}"...`,
+                text: `🎨 FusionAI is drawing: "${prompt}"...`,
                 isGeneratingImage: true
              }]);
 
@@ -289,7 +288,7 @@ export const Subject: React.FC = () => {
                     className={`flex-1 sm:flex-none flex items-center justify-center px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'ai' ? 'bg-white dark:bg-gray-700 shadow-sm text-purple-600 dark:text-purple-400' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                 >
                     <Sparkles className="w-4 h-4 mr-2" />
-                    AI Tutor
+                    FusionAI
                 </button>
             </div>
         </div>
@@ -387,7 +386,7 @@ export const Subject: React.FC = () => {
                                     {msg.isGeneratingImage && (
                                         <div className="mt-3 flex items-center space-x-2 text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg animate-pulse">
                                             <Loader2 className="w-4 h-4 animate-spin" />
-                                            <span className="text-xs font-semibold">AI Artist is working...</span>
+                                            <span className="text-xs font-semibold">FusionAI Artist is working...</span>
                                         </div>
                                     )}
 
@@ -396,11 +395,11 @@ export const Subject: React.FC = () => {
                                         <div className="mt-3 relative group">
                                             <img 
                                                 src={msg.image} 
-                                                alt="AI Generated" 
+                                                alt="FusionAI Generated" 
                                                 className="rounded-lg shadow-md max-w-full h-auto border border-gray-200 dark:border-gray-700 cursor-pointer"
                                                 onClick={() => setPreviewItem({
                                                     id: 'ai-gen',
-                                                    title: 'AI Generated Diagram',
+                                                    title: 'FusionAI Diagram',
                                                     type: 'photo',
                                                     subject: subjectName,
                                                     size: 'N/A',
@@ -448,7 +447,7 @@ export const Subject: React.FC = () => {
                         type="text" 
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        placeholder={`Ask for a diagram, circuit, or explanation...`}
+                        placeholder={`Ask FusionAI for a diagram, circuit, or explanation...`}
                         className="flex-grow p-4 pr-12 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 outline-none dark:text-white placeholder-gray-500 transition-all"
                         disabled={isLoading}
                     />
@@ -462,7 +461,7 @@ export const Subject: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center mt-2 px-1">
                      <p className="text-[10px] sm:text-xs text-gray-400">
-                        AI can make mistakes. Verify important info.
+                        FusionAI can make mistakes. Verify important info.
                     </p>
                     <div className="flex items-center text-[10px] sm:text-xs text-purple-600 dark:text-purple-400 font-medium">
                         <ImagePlus className="w-3 h-3 mr-1" />
