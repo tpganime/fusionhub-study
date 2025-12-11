@@ -1,10 +1,20 @@
 import { GoogleGenAI, Chat, FunctionDeclaration, Type } from "@google/genai";
 import { StudyMaterial } from "../types";
 
-// Ensure process.env.API_KEY is treated as a string to prevent build type errors
-const apiKey = process.env.API_KEY as string;
+// Singleton instance variable
+let aiClient: GoogleGenAI | null = null;
 
-const ai = new GoogleGenAI({ apiKey });
+const getAiClient = (): GoogleGenAI => {
+  if (!aiClient) {
+    const apiKey = process.env.API_KEY as string;
+    if (!apiKey) {
+      console.error("Gemini API Key is missing!");
+      // We return a dummy client or let it throw naturally, but logging helps debugging.
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+};
 
 // Define the Tool for Image Generation
 const imageGenerationTool: FunctionDeclaration = {
@@ -23,6 +33,8 @@ const imageGenerationTool: FunctionDeclaration = {
 };
 
 export const createSubjectChat = (subject: string, materials: StudyMaterial[] = []): Chat => {
+  const ai = getAiClient();
+  
   // Create a context string listing available materials
   const materialList = materials.map(m => 
     `- [${m.type.toUpperCase()}] "${m.title}" (Link: ${m.url})`
@@ -71,6 +83,7 @@ export const createSubjectChat = (subject: string, materials: StudyMaterial[] = 
  */
 export const generateVisualContent = async (prompt: string): Promise<string | null> => {
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
